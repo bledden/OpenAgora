@@ -2,7 +2,6 @@
 
 from typing import Optional, Any
 from datetime import datetime
-import ssl
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorCollection
 import structlog
@@ -47,18 +46,9 @@ async def get_db() -> AsyncIOMotorDatabase:
 
     if _db is None:
         settings = get_settings()
-        # OpenSSL 3.6.0+ has compatibility issues with MongoDB Atlas TLS
-        # Create a custom SSL context that accepts any certificate
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
 
-        _client = AsyncIOMotorClient(
-            settings.mongodb_uri,
-            tls=True,
-            tlsAllowInvalidCertificates=True,
-            tlsAllowInvalidHostnames=True,
-        )
+        # MongoDB Atlas connection - TLS is enabled by default for mongodb+srv://
+        _client = AsyncIOMotorClient(settings.mongodb_uri)
         _db = _client[settings.mongodb_database]
         logger.info("mongodb_connected", database=settings.mongodb_database)
 

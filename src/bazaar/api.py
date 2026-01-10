@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import structlog
+import httpx
 
 from openai import OpenAI
 from thesys_genui_sdk.fast_api import with_c1_response
@@ -49,6 +50,19 @@ from .execution.runner import execute_job
 from .payments.escrow import create_escrow
 from .payments.release import process_job_payment
 from .payments.refund import refund_payment
+from .auth import (
+    create_challenge,
+    verify_signature,
+    create_session,
+    verify_session,
+    invalidate_session,
+    get_current_agent,
+    require_auth,
+    require_agent_owner,
+    AuthenticatedAgent,
+    cleanup_expired,
+)
+from .webhooks import notify_agents_of_job, notify_bid_selected
 
 load_dotenv()
 logger = structlog.get_logger()
@@ -226,9 +240,93 @@ class AgentHeartbeatRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None  # Custom metadata
 
 
+class AuthVerifyRequest(BaseModel):
+    """Request to verify a wallet signature."""
+    wallet: str
+    signature: str
+    nonce: str
+
+
 # Rate limiting for registration (simple in-memory, per owner)
 _registration_cooldowns: Dict[str, datetime] = {}
 REGISTRATION_COOLDOWN_SECONDS = 300  # 5 minutes between registrations per owner
+
+
+# ============================================================
+# Authentication Endpoints
+# ============================================================
+
+@app.get("/api/auth/challenge")
+async def get_auth_challenge(wallet: str):
+    """Get a challenge to sign for authentication.
+
+    The client should sign the returned message/typed_data with their wallet,
+    then call /api/auth/verify with the signature.
+    """
+    if not wallet or len(wallet) != 42 or not wallet.startswith("0x"):
+        raise HTTPException(status_code=400, detail="Invalid wallet address")
+
+    challenge = create_challenge(wallet)
+    return challenge
+
+
+@app.post("/api/auth/verify")
+async def verify_auth(request: AuthVerifyRequest):
+    """Verify a wallet signature and get a session token.
+
+    After getting a challenge from /api/auth/challenge, sign it and
+    submit the signature here to get a session token.
+    """
+    if not verify_signature(request.wallet, request.signature, request.nonce):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # Look up if this wallet owns an agent
+    agent_id = None
+    if not USE_MOCK_DATA:
+        agents = await get_all_agents()
+        for agent in agents:
+            if agent.get("wallet_address", "").lower() == request.wallet.lower():
+                agent_id = agent.get("agent_id")
+                break
+            if agent.get("owner_id", "").lower() == request.wallet.lower():
+                agent_id = agent.get("agent_id")
+                break
+
+    session_token = create_session(request.wallet, agent_id)
+
+    return {
+        "success": True,
+        "session_token": session_token,
+        "wallet": request.wallet.lower(),
+        "agent_id": agent_id,
+        "message": "Authentication successful. Include token in Authorization header as: Bearer <token>",
+    }
+
+
+@app.post("/api/auth/logout")
+async def logout(auth: AuthenticatedAgent = Depends(require_auth)):
+    """Invalidate the current session."""
+    if auth.session_token:
+        invalidate_session(auth.session_token)
+    return {"success": True, "message": "Logged out"}
+
+
+@app.get("/api/auth/me")
+async def get_current_user(auth: AuthenticatedAgent = Depends(require_auth)):
+    """Get the current authenticated user/agent."""
+    result = {
+        "wallet": auth.wallet,
+        "agent_id": auth.agent_id,
+        "authenticated": True,
+    }
+
+    # If they own an agent, include agent details
+    if auth.agent_id and not USE_MOCK_DATA:
+        agent = await get_agent(auth.agent_id)
+        if agent:
+            result["agent"] = agent
+
+    return result
 
 
 # ============================================================
@@ -363,10 +461,15 @@ async def register_agent(request: AgentRegisterRequest):
 
 
 @app.put("/api/agents/{agent_id}")
-async def update_agent(agent_id: str, request: AgentUpdateRequest):
+async def update_agent(
+    agent_id: str,
+    request: AgentUpdateRequest,
+    auth: Optional[AuthenticatedAgent] = Depends(get_current_agent),
+):
     """Update agent settings.
 
     Allows agents to update their name, description, pricing, status, and webhook URL.
+    Requires authentication - caller must own the agent.
     """
     if USE_MOCK_DATA:
         raise HTTPException(
@@ -378,6 +481,13 @@ async def update_agent(agent_id: str, request: AgentUpdateRequest):
     agent = await get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership (if auth is enabled)
+    if auth:
+        owner_id = agent.get("owner_id", "").lower()
+        wallet_address = agent.get("wallet_address", "").lower()
+        if auth.wallet.lower() not in [owner_id, wallet_address]:
+            raise HTTPException(status_code=403, detail="You don't own this agent")
 
     # Build update dict from non-None fields
     updates = {}
@@ -415,12 +525,18 @@ async def update_agent(agent_id: str, request: AgentUpdateRequest):
 
 
 @app.post("/api/agents/{agent_id}/heartbeat")
-async def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest):
+async def agent_heartbeat(
+    agent_id: str,
+    request: AgentHeartbeatRequest,
+    auth: Optional[AuthenticatedAgent] = Depends(get_current_agent),
+):
     """Agent heartbeat to signal availability.
 
     Agents should call this periodically (e.g., every 60 seconds) to indicate
     they are online and available for jobs. This updates the agent's last_active
     timestamp and status.
+
+    Requires authentication - caller must own the agent.
     """
     if USE_MOCK_DATA:
         # In mock mode, just return success for testing
@@ -435,6 +551,13 @@ async def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest):
     agent = await get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership (if auth is enabled)
+    if auth:
+        owner_id = agent.get("owner_id", "").lower()
+        wallet_address = agent.get("wallet_address", "").lower()
+        if auth.wallet.lower() not in [owner_id, wallet_address]:
+            raise HTTPException(status_code=403, detail="You don't own this agent")
 
     # Validate status
     if request.status not in ["available", "busy", "offline"]:
@@ -530,7 +653,7 @@ async def get_job_details(job_id: str):
 
 
 @app.post("/api/jobs")
-async def create_job(request: JobCreateRequest):
+async def create_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
     """Create a new job and escrow payment."""
     job_id = f"job_{uuid.uuid4().hex[:8]}"
 
@@ -577,6 +700,14 @@ async def create_job(request: JobCreateRequest):
 
     # Match agents
     matched_agents = await match_agents_to_job(job)
+    matched_agent_ids = [a["agent_id"] for a in matched_agents]
+
+    # Notify matched agents via webhooks (in background)
+    background_tasks.add_task(
+        notify_agents_of_job,
+        job.model_dump(),
+        matched_agent_ids,
+    )
 
     logger.info(
         "job_created",
@@ -588,7 +719,7 @@ async def create_job(request: JobCreateRequest):
     return {
         "job_id": job_id,
         "escrow_txn_id": escrow_txn.txn_id,
-        "matched_agents": [a["agent_id"] for a in matched_agents],
+        "matched_agents": matched_agent_ids,
         "status": "posted",
     }
 
