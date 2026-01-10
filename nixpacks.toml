@@ -1,9 +1,11 @@
+# Railway/Nixpacks configuration for Open Agora
 [phases.setup]
-nixPkgs = ["python311", "nodejs_20"]
+nixPkgs = ["python311", "nodejs_20", "python311Packages.pip"]
 
 [phases.install]
 cmds = [
-  "pip install -e .",
+  "python -m venv /opt/venv",
+  ". /opt/venv/bin/activate && pip install -e .",
   "cd ui && npm install"
 ]
 
@@ -13,7 +15,8 @@ cmds = [
 ]
 
 [start]
-cmd = "uvicorn bazaar.api:app --host 0.0.0.0 --port ${PORT:-8000}"
+cmd = ". /opt/venv/bin/activate && uvicorn bazaar.api:app --host 0.0.0.0 --port ${PORT:-8000}"
 
 [variables]
 PYTHONPATH = "/app/src"
+PATH = "/opt/venv/bin:${PATH}"
