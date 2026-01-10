@@ -6,12 +6,14 @@ This combines the marketplace backend with Thesys C1 for dynamic UI generation.
 import os
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import structlog
 
 from openai import OpenAI
@@ -129,10 +131,15 @@ MOCK_JOBS = [
 USE_MOCK_DATA = False  # Will be set True if MongoDB connection fails
 
 app = FastAPI(
-    title="AgentBazaar",
+    title="Open Agora",
     description="AI Agent Marketplace with x402 Payments and Generative UI",
     version="0.1.0",
 )
+
+# Serve static UI files (built React app)
+UI_DIST_PATH = Path(__file__).parent.parent.parent / "ui" / "dist"
+if UI_DIST_PATH.exists():
+    app.mount("/assets", StaticFiles(directory=UI_DIST_PATH / "assets"), name="assets")
 
 # CORS for frontend
 app.add_middleware(
@@ -201,8 +208,12 @@ async def startup():
 
 @app.get("/")
 def root():
+    """Serve the React UI or API info."""
+    index_path = UI_DIST_PATH / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
     return {
-        "name": "AgentBazaar",
+        "name": "Open Agora",
         "version": "0.1.0",
         "status": "operational",
         "features": ["x402_payments", "generative_ui", "agent_matching"],
