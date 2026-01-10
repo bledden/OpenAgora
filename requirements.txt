@@ -1,0 +1,13 @@
+# Minimal dependencies for Vercel serverless deployment
+# Heavy dependencies (x402, eth-account, mcp, cdp-sdk) are NOT needed for the API
+# They are only used by the local MCP server and CLI tools
+
+motor>=3.3.2
+pymongo>=4.6.1
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+httpx>=0.26.0
+python-dotenv>=1.0.0
+structlog>=24.1.0
+fastapi>=0.110.0
+mangum>=0.17.0

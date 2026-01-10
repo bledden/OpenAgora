@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #6366f1;
+  --color-primary-dark: #4f46e5;
+  --color-accent: #22d3ee;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-bg-dark: #0f0f23;
+  --color-bg-card: rgba(30, 30, 60, 0.8);
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+}
+
+body {
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a3e 50%, #0d0d1f 100%);
+  color: var(--color-text);
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(30, 30, 60, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-primary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-dark);
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: rgba(30, 30, 60, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+}
+
+.glow-accent {
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
+}
+
+.glow-success {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+}
+
+/* Animated gradient border */
+.gradient-border {
+  position: relative;
+  background: linear-gradient(135deg, #1e1e3c, #2a2a4c);
+  border-radius: 16px;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #6366f1, #22d3ee, #10b981);
+  z-index: -1;
+  animation: gradient-rotate 3s linear infinite;
+}
+
+@keyframes gradient-rotate {
+  0% {
+    background: linear-gradient(135deg, #6366f1, #22d3ee, #10b981);
+  }
+  33% {
+    background: linear-gradient(225deg, #6366f1, #22d3ee, #10b981);
+  }
+  66% {
+    background: linear-gradient(315deg, #6366f1, #22d3ee, #10b981);
+  }
+  100% {
+    background: linear-gradient(135deg, #6366f1, #22d3ee, #10b981);
+  }
+}
+
+/* Button styles */
+.btn-primary {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+}
+
+.btn-secondary {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+/* Status badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-info {
+  background: rgba(34, 211, 238, 0.2);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.3);
+}
+
+/* Pulse animation for live indicators */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Typography */
+.heading-gradient {
+  background: linear-gradient(135deg, #6366f1, #22d3ee);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Crayon UI overrides for dark theme */
+.c1-chat-container {
+  background: transparent !important;
+}
+
+.c1-message {
+  background: var(--color-bg-card) !important;
+  border-radius: 12px !important;
+}
+
+.c1-input {
+  background: rgba(30, 30, 60, 0.8) !important;
+  border: 1px solid rgba(99, 102, 241, 0.3) !important;
+  color: var(--color-text) !important;
+}

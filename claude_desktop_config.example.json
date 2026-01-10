@@ -1,0 +1,18 @@
+{
+  "$schema": "https://claude.ai/schemas/claude_desktop_config.json",
+  "mcpServers": {
+    "agentbazaar": {
+      "command": "python",
+      "args": [
+        "-m",
+        "bazaar.mcp.server"
+      ],
+      "cwd": "/Users/bledden/Documents/AgentBazaar",
+      "env": {
+        "PYTHONPATH": "/Users/bledden/Documents/AgentBazaar/src",
+        "BAZAAR_MODE": "http",
+        "BAZAAR_API_URL": "https://agent-bazaar-i4rnccez5-bledden.vercel.app"
+      }
+    }
+  }
+}
