@@ -49,6 +49,85 @@ from .payments.refund import refund_payment
 load_dotenv()
 logger = structlog.get_logger()
 
+# Mock data for development when MongoDB is unavailable
+MOCK_AGENTS = [
+    {
+        "agent_id": "agent_alpha_001",
+        "name": "DataAnalyzer Pro",
+        "description": "Specialized in data extraction, sentiment analysis, and pattern recognition. High accuracy with structured data processing.",
+        "capabilities": {"data_extraction": 0.95, "sentiment_analysis": 0.88, "pattern_recognition": 0.92, "summarization": 0.85},
+        "rating_avg": 4.8,
+        "rating_count": 127,
+        "jobs_completed": 156,
+        "jobs_failed": 3,
+        "base_rate_usd": 2.50,
+        "status": "available",
+        "total_earned_usd": 1250.00,
+    },
+    {
+        "agent_id": "agent_beta_002",
+        "name": "CodeReview Assistant",
+        "description": "Expert code reviewer with deep understanding of security vulnerabilities and best practices across multiple languages.",
+        "capabilities": {"code_review": 0.94, "pattern_recognition": 0.89, "classification": 0.86, "anomaly_detection": 0.91},
+        "rating_avg": 4.6,
+        "rating_count": 89,
+        "jobs_completed": 98,
+        "jobs_failed": 5,
+        "base_rate_usd": 3.00,
+        "status": "available",
+        "total_earned_usd": 890.00,
+    },
+    {
+        "agent_id": "agent_gamma_003",
+        "name": "ContentSummarizer",
+        "description": "Fast and accurate document summarization with support for multiple languages and content types.",
+        "capabilities": {"summarization": 0.96, "aggregation": 0.90, "classification": 0.84, "data_extraction": 0.82},
+        "rating_avg": 4.9,
+        "rating_count": 203,
+        "jobs_completed": 245,
+        "jobs_failed": 2,
+        "base_rate_usd": 1.75,
+        "status": "busy",
+        "total_earned_usd": 2100.00,
+    },
+]
+
+MOCK_JOBS = [
+    {
+        "job_id": "job_abc123",
+        "title": "Analyze Q4 Sales Report",
+        "description": "Extract key metrics, trends, and insights from the quarterly sales data. Identify top performing products and regions.",
+        "budget_usd": 15.00,
+        "status": "posted",
+        "required_capabilities": ["data_extraction", "pattern_recognition", "summarization"],
+        "poster_id": "user_demo",
+        "created_at": "2026-01-10T10:00:00Z",
+    },
+    {
+        "job_id": "job_def456",
+        "title": "Security Code Review for Auth Module",
+        "description": "Review the authentication module for potential security vulnerabilities and suggest improvements.",
+        "budget_usd": 25.00,
+        "status": "bidding",
+        "required_capabilities": ["code_review", "anomaly_detection"],
+        "poster_id": "user_enterprise",
+        "created_at": "2026-01-10T09:30:00Z",
+    },
+    {
+        "job_id": "job_ghi789",
+        "title": "Summarize Research Papers",
+        "description": "Summarize 10 academic papers on machine learning optimization techniques. Need concise abstracts and key findings.",
+        "budget_usd": 8.00,
+        "status": "in_progress",
+        "required_capabilities": ["summarization", "aggregation"],
+        "poster_id": "user_researcher",
+        "assigned_agent_id": "agent_gamma_003",
+        "created_at": "2026-01-10T08:00:00Z",
+    },
+]
+
+USE_MOCK_DATA = False  # Will be set True if MongoDB connection fails
+
 app = FastAPI(
     title="AgentBazaar",
     description="AI Agent Marketplace with x402 Payments and Generative UI",
@@ -108,8 +187,16 @@ class JobCreateRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
-    logger.info("agentbazaar_api_started")
+    global USE_MOCK_DATA
+    try:
+        await init_db()
+        # Test the connection by trying to list agents
+        await get_all_agents()
+        logger.info("agentbazaar_api_started", mode="database")
+    except Exception as e:
+        logger.warning("mongodb_unavailable", error=str(e)[:100], mode="mock_data")
+        USE_MOCK_DATA = True
+        logger.info("agentbazaar_api_started", mode="mock_data")
 
 
 @app.get("/")
@@ -125,6 +212,8 @@ def root():
 @app.get("/api/agents")
 async def list_agents():
     """Get all registered agents."""
+    if USE_MOCK_DATA:
+        return {"agents": MOCK_AGENTS, "count": len(MOCK_AGENTS)}
     agents = await get_all_agents()
     return {"agents": agents, "count": len(agents)}
 
@@ -132,6 +221,11 @@ async def list_agents():
 @app.get("/api/agents/{agent_id}")
 async def get_agent_details(agent_id: str):
     """Get details for a specific agent."""
+    if USE_MOCK_DATA:
+        agent = next((a for a in MOCK_AGENTS if a["agent_id"] == agent_id), None)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        return agent
     agent = await get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -141,6 +235,11 @@ async def get_agent_details(agent_id: str):
 @app.get("/api/jobs")
 async def list_jobs(status: Optional[str] = None):
     """Get all jobs, optionally filtered by status."""
+    if USE_MOCK_DATA:
+        jobs = MOCK_JOBS
+        if status:
+            jobs = [j for j in jobs if j.get("status") == status]
+        return {"jobs": jobs, "count": len(jobs)}
     jobs = await get_all_jobs()
     if status:
         jobs = [j for j in jobs if j.get("status") == status]
@@ -150,6 +249,12 @@ async def list_jobs(status: Optional[str] = None):
 @app.get("/api/jobs/{job_id}")
 async def get_job_details(job_id: str):
     """Get details for a specific job."""
+    if USE_MOCK_DATA:
+        job = next((j for j in MOCK_JOBS if j["job_id"] == job_id), None)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job["bids"] = []
+        return job
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -165,6 +270,22 @@ async def get_job_details(job_id: str):
 async def create_job(request: JobCreateRequest):
     """Create a new job and escrow payment."""
     job_id = f"job_{uuid.uuid4().hex[:8]}"
+
+    if USE_MOCK_DATA:
+        # In mock mode, just add to the in-memory list
+        new_job = {
+            "job_id": job_id,
+            "title": request.title,
+            "description": request.description,
+            "budget_usd": request.budget_usd,
+            "status": "posted",
+            "required_capabilities": request.required_capabilities,
+            "poster_id": request.poster_id,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
+        MOCK_JOBS.insert(0, new_job)
+        logger.info("job_created", job_id=job_id, mode="mock_data")
+        return {"job_id": job_id, "status": "posted", "message": "Job created (mock mode)"}
 
     job = BazaarJob(
         job_id=job_id,

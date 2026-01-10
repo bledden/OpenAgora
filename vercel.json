@@ -11,7 +11,10 @@
     },
     {
       "src": "api/index.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
     }
   ],
   "routes": [
@@ -27,5 +30,11 @@
       "src": "/(.*)",
       "dest": "/ui/$1"
     }
-  ]
+  ],
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.12"
+    }
+  },
+  "installCommand": "cd ui && npm install && cd .. && pip install -r requirements.txt"
 }
