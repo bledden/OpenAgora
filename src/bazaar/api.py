@@ -31,7 +31,9 @@ from .db import (
     get_transaction,
     create_job as db_create_job,
     update_job,
+    update_agent as db_update_agent,
 )
+from .registry.register import register_agent as do_register_agent
 from .models import BazaarJob, JobStatus, TransactionStatus
 from .jobs.match import match_agents_to_job
 from .bidding.submit import submit_bid, select_winning_bid
@@ -193,6 +195,42 @@ class JobCreateRequest(BaseModel):
     poster_wallet: str
 
 
+class AgentRegisterRequest(BaseModel):
+    """Request to register a new agent on the marketplace."""
+    name: str
+    description: str
+    owner_id: str  # Owner's wallet or identifier
+    wallet_address: str  # x402 payment address for receiving payments
+    provider: str = "fireworks"  # LLM provider: fireworks, nvidia, openai
+    model: Optional[str] = None  # Model identifier (defaults by provider)
+    base_rate_usd: float = 0.01  # Minimum price per task
+    rate_per_1k_tokens: float = 0.001  # Token-based pricing
+    skip_benchmark: bool = False  # Skip benchmark (for testing only)
+    webhook_url: Optional[str] = None  # URL to notify when jobs are available
+
+
+class AgentUpdateRequest(BaseModel):
+    """Request to update agent settings."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    base_rate_usd: Optional[float] = None
+    rate_per_1k_tokens: Optional[float] = None
+    status: Optional[str] = None  # available, busy, offline
+    webhook_url: Optional[str] = None
+
+
+class AgentHeartbeatRequest(BaseModel):
+    """Agent heartbeat to signal availability."""
+    status: str = "available"  # available, busy, offline
+    current_capacity: int = 1  # How many concurrent jobs agent can handle
+    metadata: Optional[Dict[str, Any]] = None  # Custom metadata
+
+
+# Rate limiting for registration (simple in-memory, per owner)
+_registration_cooldowns: Dict[str, datetime] = {}
+REGISTRATION_COOLDOWN_SECONDS = 300  # 5 minutes between registrations per owner
+
+
 # ============================================================
 # Marketplace REST Endpoints
 # ============================================================
@@ -246,6 +284,215 @@ async def get_agent_details(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
+
+
+@app.post("/api/agents/register")
+async def register_agent(request: AgentRegisterRequest):
+    """Register a new agent on the marketplace.
+
+    This endpoint allows developers to register their AI agents to receive jobs.
+    The agent will be benchmarked to verify its capabilities (unless skip_benchmark=true).
+
+    Benchmarking runs ~21 tests across 5 capability categories:
+    - Summarization
+    - Sentiment Analysis
+    - Data Extraction
+    - Classification
+    - Pattern Recognition
+
+    Rate limited to 1 registration per owner per 5 minutes.
+    """
+    if USE_MOCK_DATA:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent registration requires database connection. Currently in mock mode."
+        )
+
+    # Rate limiting check
+    now = datetime.utcnow()
+    last_registration = _registration_cooldowns.get(request.owner_id)
+    if last_registration:
+        elapsed = (now - last_registration).total_seconds()
+        if elapsed < REGISTRATION_COOLDOWN_SECONDS:
+            remaining = int(REGISTRATION_COOLDOWN_SECONDS - elapsed)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limited. Please wait {remaining} seconds before registering another agent."
+            )
+
+    try:
+        agent = await do_register_agent(
+            name=request.name,
+            description=request.description,
+            owner_id=request.owner_id,
+            provider=request.provider,
+            model=request.model,
+            wallet_address=request.wallet_address,
+            base_rate_usd=request.base_rate_usd,
+            rate_per_1k_tokens=request.rate_per_1k_tokens,
+            skip_benchmark=request.skip_benchmark,
+        )
+
+        # Update cooldown
+        _registration_cooldowns[request.owner_id] = now
+
+        # Store webhook URL if provided
+        if request.webhook_url:
+            await db_update_agent(agent.agent_id, {"webhook_url": request.webhook_url})
+
+        logger.info(
+            "agent_registered_via_api",
+            agent_id=agent.agent_id,
+            name=agent.name,
+            owner_id=request.owner_id,
+        )
+
+        return {
+            "success": True,
+            "agent_id": agent.agent_id,
+            "name": agent.name,
+            "status": agent.status.value if hasattr(agent.status, 'value') else agent.status,
+            "capabilities": agent.capabilities.model_dump() if hasattr(agent.capabilities, 'model_dump') else agent.capabilities,
+            "message": "Agent registered successfully. Capabilities have been benchmarked." if not request.skip_benchmark else "Agent registered (benchmark skipped).",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("agent_registration_failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@app.put("/api/agents/{agent_id}")
+async def update_agent(agent_id: str, request: AgentUpdateRequest):
+    """Update agent settings.
+
+    Allows agents to update their name, description, pricing, status, and webhook URL.
+    """
+    if USE_MOCK_DATA:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent updates require database connection. Currently in mock mode."
+        )
+
+    # Verify agent exists
+    agent = await get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Build update dict from non-None fields
+    updates = {}
+    if request.name is not None:
+        updates["name"] = request.name
+    if request.description is not None:
+        updates["description"] = request.description
+    if request.base_rate_usd is not None:
+        updates["base_rate_usd"] = request.base_rate_usd
+    if request.rate_per_1k_tokens is not None:
+        updates["rate_per_1k_tokens"] = request.rate_per_1k_tokens
+    if request.status is not None:
+        if request.status not in ["available", "busy", "offline"]:
+            raise HTTPException(status_code=400, detail="Invalid status. Must be: available, busy, or offline")
+        updates["status"] = request.status
+    if request.webhook_url is not None:
+        updates["webhook_url"] = request.webhook_url
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    updates["last_active"] = datetime.utcnow()
+
+    success = await db_update_agent(agent_id, updates)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update agent")
+
+    logger.info("agent_updated_via_api", agent_id=agent_id, updates=list(updates.keys()))
+
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "updated_fields": list(updates.keys()),
+    }
+
+
+@app.post("/api/agents/{agent_id}/heartbeat")
+async def agent_heartbeat(agent_id: str, request: AgentHeartbeatRequest):
+    """Agent heartbeat to signal availability.
+
+    Agents should call this periodically (e.g., every 60 seconds) to indicate
+    they are online and available for jobs. This updates the agent's last_active
+    timestamp and status.
+    """
+    if USE_MOCK_DATA:
+        # In mock mode, just return success for testing
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "status": request.status,
+            "message": "Heartbeat received (mock mode)",
+        }
+
+    # Verify agent exists
+    agent = await get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Validate status
+    if request.status not in ["available", "busy", "offline"]:
+        raise HTTPException(status_code=400, detail="Invalid status. Must be: available, busy, or offline")
+
+    # Update agent
+    updates = {
+        "status": request.status,
+        "last_active": datetime.utcnow(),
+        "current_capacity": request.current_capacity,
+    }
+    if request.metadata:
+        updates["heartbeat_metadata"] = request.metadata
+
+    await db_update_agent(agent_id, updates)
+
+    # Check for pending jobs that match this agent (for webhook notification)
+    pending_jobs = []
+    if request.status == "available":
+        all_jobs = await get_all_jobs()
+        for job in all_jobs:
+            if job.get("status") == "posted":
+                pending_jobs.append({
+                    "job_id": job["job_id"],
+                    "title": job.get("title", ""),
+                    "budget_usd": job.get("budget_usd", 0),
+                })
+
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "status": request.status,
+        "last_active": updates["last_active"].isoformat(),
+        "pending_jobs_count": len(pending_jobs),
+        "pending_jobs": pending_jobs[:5],  # Return up to 5 pending jobs
+    }
+
+
+@app.get("/api/agents/{agent_id}/jobs")
+async def get_agent_jobs(agent_id: str, status: Optional[str] = None):
+    """Get jobs assigned to or completed by this agent."""
+    if USE_MOCK_DATA:
+        jobs = [j for j in MOCK_JOBS if j.get("assigned_agent_id") == agent_id]
+        if status:
+            jobs = [j for j in jobs if j.get("status") == status]
+        return {"jobs": jobs, "count": len(jobs)}
+
+    # Verify agent exists
+    agent = await get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    all_jobs = await get_all_jobs()
+    jobs = [j for j in all_jobs if j.get("assigned_agent_id") == agent_id]
+    if status:
+        jobs = [j for j in jobs if j.get("status") == status]
+
+    return {"jobs": jobs, "count": len(jobs)}
 
 
 @app.get("/api/jobs")
