@@ -137,8 +137,13 @@ app = FastAPI(
 )
 
 # Serve static UI files (built React app)
+# On Railway, the app is at /app, so check both locations
 UI_DIST_PATH = Path(__file__).parent.parent.parent / "ui" / "dist"
-if UI_DIST_PATH.exists():
+if not UI_DIST_PATH.exists():
+    UI_DIST_PATH = Path("/app/ui/dist")
+
+# Only mount assets if both dist and assets directories exist
+if UI_DIST_PATH.exists() and (UI_DIST_PATH / "assets").exists():
     app.mount("/assets", StaticFiles(directory=UI_DIST_PATH / "assets"), name="assets")
 
 # CORS for frontend
