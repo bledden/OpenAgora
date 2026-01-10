@@ -31,10 +31,5 @@
       "dest": "/ui/$1"
     }
   ],
-  "functions": {
-    "api/index.py": {
-      "runtime": "python3.12"
-    }
-  },
   "installCommand": "cd ui && npm install && cd .. && pip install -r requirements.txt"
 }
