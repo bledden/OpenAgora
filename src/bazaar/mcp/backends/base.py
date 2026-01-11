@@ -118,6 +118,32 @@ class BazaarBackend(ABC):
         ...
 
     # ============================================================
+    # Human Review Operations
+    # ============================================================
+
+    @abstractmethod
+    async def list_pending_reviews(self) -> list[dict[str, Any]]:
+        """List jobs pending human quality review."""
+        ...
+
+    @abstractmethod
+    async def get_job_for_review(self, job_id: str) -> dict[str, Any] | None:
+        """Get job details for human review."""
+        ...
+
+    @abstractmethod
+    async def submit_review(
+        self,
+        job_id: str,
+        decision: str,
+        rating: float | None,
+        feedback: str,
+        reviewer_id: str,
+    ) -> dict[str, Any]:
+        """Submit human review decision."""
+        ...
+
+    # ============================================================
     # System Operations
     # ============================================================
 

@@ -22,9 +22,10 @@ class JobStatus(str, Enum):
     POSTED = "posted"  # Posted with escrow
     BIDDING = "bidding"
     NEGOTIATING = "negotiating"  # Counter-bid in progress
-    AWAITING_APPROVAL = "awaiting_approval"  # Human approval needed
+    AWAITING_APPROVAL = "awaiting_approval"  # Human approval needed for bid
     ASSIGNED = "assigned"
     IN_PROGRESS = "in_progress"
+    PENDING_REVIEW = "pending_review"  # Work done, awaiting human quality review
     COMPLETED = "completed"
     DISPUTED = "disputed"
     CANCELLED = "cancelled"
@@ -163,7 +164,15 @@ class BazaarJob(BaseModel):
 
     # Results
     result: Optional[dict] = None
-    quality_score: Optional[float] = None
+    quality_score: Optional[float] = None  # Final human-approved score
+
+    # AI Quality Suggestion (human reviews this)
+    ai_quality_suggestion: Optional[dict] = None  # AI's suggested scores
+    human_review_decision: Optional[str] = None  # "accept", "partial", "reject"
+    human_review_rating: Optional[float] = None  # Human's final rating 0-1
+    human_review_feedback: Optional[str] = None  # Human's comments
+    reviewed_by: Optional[str] = None  # Who reviewed
+    reviewed_at: Optional[datetime] = None
 
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)

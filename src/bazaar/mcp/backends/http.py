@@ -200,6 +200,52 @@ class HTTPBazaarBackend(BazaarBackend):
         return response.json()
 
     # ============================================================
+    # Human Review Operations
+    # ============================================================
+
+    async def list_pending_reviews(self) -> list[dict[str, Any]]:
+        """List jobs pending human quality review."""
+        response = await self.client.get("/api/reviews/pending")
+        response.raise_for_status()
+        data = response.json()
+        return data.get("pending_reviews", [])
+
+    async def get_job_for_review(self, job_id: str) -> dict[str, Any] | None:
+        """Get job details for human review."""
+        response = await self.client.get(f"/api/jobs/{job_id}/review")
+        if response.status_code == 404:
+            return None
+        if response.status_code == 400:
+            # Job not pending review
+            return None
+        response.raise_for_status()
+        return response.json()
+
+    async def submit_review(
+        self,
+        job_id: str,
+        decision: str,
+        rating: float | None,
+        feedback: str,
+        reviewer_id: str,
+    ) -> dict[str, Any]:
+        """Submit human review decision."""
+        payload = {
+            "decision": decision,
+            "feedback": feedback,
+            "reviewer_id": reviewer_id,
+        }
+        # Default rating based on decision if not provided
+        if rating is not None:
+            payload["rating"] = rating
+        else:
+            payload["rating"] = {"accept": 1.0, "partial": 0.5, "reject": 0.2}.get(decision, 0.5)
+
+        response = await self.client.post(f"/api/jobs/{job_id}/review", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    # ============================================================
     # System Operations
     # ============================================================
 

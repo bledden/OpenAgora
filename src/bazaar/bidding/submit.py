@@ -37,7 +37,7 @@ async def submit_bid(
     if not job:
         raise ValueError(f"Job {job_id} not found")
 
-    if job["status"] not in [JobStatus.OPEN.value, JobStatus.BIDDING.value]:
+    if job["status"] not in [JobStatus.OPEN.value, JobStatus.POSTED.value, JobStatus.BIDDING.value]:
         raise ValueError(f"Job {job_id} is not accepting bids (status: {job['status']})")
 
     # Check bid deadline

@@ -376,16 +376,28 @@ def execute_job(job_id: str = typer.Option(..., help="Job ID to execute")):
             progress.add_task("Agent is working...", total=None)
             result = await do_execute(job_id)
 
-        if result.get("status") == "completed":
+        status = result.get("status")
+        if status in ("pending_review", "completed"):
+            ai_suggestion = result.get("ai_quality_suggestion", {})
+            suggested_score = ai_suggestion.get("suggested_overall", 0) if ai_suggestion else 0
+            recommendation = ai_suggestion.get("recommendation", "N/A") if ai_suggestion else "N/A"
+
             panel = Panel(
                 f"""[bold]Job:[/] {result['job_id']}
 [bold]Agent:[/] {result['agent_id']}
-[bold]Quality Score:[/] {result['quality_score']:.2f}
+[bold]Status:[/] [cyan]PENDING HUMAN REVIEW[/]
 [bold]Execution Time:[/] {result['execution_time_ms']:.0f}ms
 
+[bold cyan]AI Quality Suggestion:[/]
+  Suggested Score: {suggested_score:.0%}
+  Recommendation: {recommendation}
+
 [bold]Result Summary:[/]
-{result.get('result', {}).get('summary', 'No summary')}""",
-                title="[green]Job Completed[/]",
+{result.get('result', {}).get('summary', 'No summary')}
+
+[yellow]Run 'list-reviews' to see pending reviews
+Run 'review-job --job-id {job_id}' to review this job[/]""",
+                title="[cyan]Work Complete - Awaiting Review[/]",
             )
         else:
             panel = Panel(
@@ -432,24 +444,285 @@ def process_payment(job_id: str = typer.Option(..., help="Job ID to process paym
 
 
 # ============================================================
+# Human Review Commands
+# ============================================================
+
+@app.command()
+def list_reviews():
+    """List jobs pending human quality review."""
+    from .db import get_all_jobs
+    from .models import JobStatus
+
+    async def _list():
+        jobs = await get_all_jobs()
+        pending = [j for j in jobs if j.get("status") == JobStatus.PENDING_REVIEW.value]
+
+        if not pending:
+            console.print("[green]No jobs pending review.[/]")
+            return
+
+        table = Table(title="Pending Reviews")
+        table.add_column("Job ID", style="cyan")
+        table.add_column("Title", style="green")
+        table.add_column("Agent")
+        table.add_column("Budget", justify="right")
+        table.add_column("AI Suggestion", justify="right")
+
+        for j in pending:
+            ai_suggestion = j.get("ai_quality_suggestion", {})
+            suggested_score = ai_suggestion.get("suggested_overall", 0) if ai_suggestion else 0
+            recommendation = ai_suggestion.get("recommendation", "?") if ai_suggestion else "?"
+
+            table.add_row(
+                j.get("job_id", "?"),
+                j.get("title", "?")[:30],
+                j.get("assigned_agent_id", "?")[:10] + "...",
+                f"${j.get('budget_usd', 0):.2f}",
+                f"{suggested_score:.0%} ({recommendation})",
+            )
+
+        console.print(table)
+        console.print(f"\n[yellow]Use 'review-job --job-id <ID>' to review a job[/]")
+
+    run_async(_list())
+
+
+@app.command()
+def review_job(
+    job_id: str = typer.Option(..., help="Job ID to review"),
+):
+    """View job details and AI quality suggestion for human review."""
+    from .db import get_job, get_agent
+    from .models import JobStatus
+
+    async def _review():
+        job = await get_job(job_id)
+        if not job:
+            console.print(f"[red]Job {job_id} not found[/]")
+            return
+
+        if job.get("status") != JobStatus.PENDING_REVIEW.value:
+            console.print(f"[yellow]Job is not pending review (status: {job.get('status')})[/]")
+            return
+
+        # Get agent info
+        agent = await get_agent(job.get("assigned_agent_id")) if job.get("assigned_agent_id") else None
+        agent_name = agent.get("name") if agent else job.get("assigned_agent_id", "Unknown")
+
+        # AI Suggestion
+        ai = job.get("ai_quality_suggestion", {})
+
+        console.print(Panel(
+            f"""[bold]Job ID:[/] {job_id}
+[bold]Title:[/] {job.get('title')}
+[bold]Description:[/] {job.get('description', '')[:200]}
+
+[bold]Completed by:[/] {agent_name}
+[bold]Budget:[/] ${job.get('budget_usd', 0):.2f}
+
+[bold cyan]AI Quality Suggestion:[/]
+  Overall Score: {ai.get('suggested_overall', 0):.0%}
+  Recommendation: {ai.get('recommendation', 'N/A')}
+
+  Scores:
+    Relevance: {ai.get('scores', {}).get('relevance', 0):.0%}
+    Accuracy: {ai.get('scores', {}).get('accuracy', 0):.0%}
+    Completeness: {ai.get('scores', {}).get('completeness', 0):.0%}
+    Clarity: {ai.get('scores', {}).get('clarity', 0):.0%}
+    Actionability: {ai.get('scores', {}).get('actionability', 0):.0%}
+
+  Feedback: {ai.get('feedback', 'N/A')}
+
+[bold green]Strengths:[/] {', '.join(ai.get('strengths', [])) or 'None'}
+[bold yellow]Improvements:[/] {', '.join(ai.get('improvements', [])) or 'None'}
+[bold red]Red Flags:[/] {', '.join(ai.get('red_flags', [])) or 'None'}""",
+            title="[cyan]Job Review[/]",
+        ))
+
+        # Result preview
+        result = job.get("result", {})
+        if result:
+            summary = result.get("summary", str(result))[:300]
+            console.print(Panel(
+                summary,
+                title="[blue]Agent's Result (preview)[/]",
+            ))
+
+        console.print("\n[yellow]Use 'submit-review --job-id <ID> --decision <accept|partial|reject>' to submit your decision[/]")
+
+    run_async(_review())
+
+
+@app.command()
+def submit_review(
+    job_id: str = typer.Option(..., help="Job ID to review"),
+    decision: str = typer.Option(..., help="Decision: accept, partial, or reject"),
+    rating: float = typer.Option(None, help="Quality rating 0.0-1.0 (defaults based on decision)"),
+    feedback: str = typer.Option("", help="Feedback for the agent"),
+    reviewer: str = typer.Option("demo_user", help="Reviewer ID"),
+):
+    """Submit human review decision for a completed job."""
+    from .db import get_job, get_agent, update_job, update_agent as db_update_agent
+    from .models import JobStatus
+    from .payments.release import release_payment
+    from .payments.refund import refund_payment
+    from datetime import datetime
+
+    async def _submit():
+        if decision not in ["accept", "partial", "reject"]:
+            console.print("[red]Decision must be 'accept', 'partial', or 'reject'[/]")
+            return
+
+        job = await get_job(job_id)
+        if not job:
+            console.print(f"[red]Job {job_id} not found[/]")
+            return
+
+        if job.get("status") != JobStatus.PENDING_REVIEW.value:
+            console.print(f"[yellow]Job is not pending review (status: {job.get('status')})[/]")
+            return
+
+        # Default rating based on decision
+        final_rating = rating
+        if final_rating is None:
+            final_rating = {"accept": 1.0, "partial": 0.5, "reject": 0.2}[decision]
+
+        # Validate rating
+        if not (0.0 <= final_rating <= 1.0):
+            console.print("[red]Rating must be between 0.0 and 1.0[/]")
+            return
+
+        console.print(f"[bold blue]Submitting review for {job_id}...[/]")
+
+        # Update job with human review
+        await update_job(job_id, {
+            "status": JobStatus.COMPLETED.value,
+            "quality_score": final_rating,
+            "human_review_decision": decision,
+            "human_review_rating": final_rating,
+            "human_review_feedback": feedback,
+            "reviewed_by": reviewer,
+            "reviewed_at": datetime.utcnow(),
+            "completed_at": datetime.utcnow(),
+        })
+
+        # Process payment
+        escrow_txn_id = job.get("escrow_txn_id")
+        agent_id = job.get("assigned_agent_id")
+        agent = await get_agent(agent_id) if agent_id else None
+        agreed_price = job.get("final_price_usd") or job.get("budget_usd", 0)
+
+        payment_result = {}
+
+        if not escrow_txn_id:
+            payment_result["error"] = "No escrow found"
+        elif decision == "accept":
+            try:
+                txn = await release_payment(
+                    escrow_txn_id=escrow_txn_id,
+                    payee_id=agent_id,
+                    payee_wallet=agent.get("wallet_address", "") if agent else "",
+                    amount_usd=agreed_price,
+                )
+                payment_result["status"] = "released"
+                payment_result["amount"] = agreed_price
+
+                if agent:
+                    await db_update_agent(agent_id, {
+                        "jobs_completed": agent.get("jobs_completed", 0) + 1,
+                        "total_earned_usd": agent.get("total_earned_usd", 0) + agreed_price,
+                    })
+            except Exception as e:
+                payment_result["error"] = str(e)
+
+        elif decision == "partial":
+            partial_amount = agreed_price * 0.5
+            try:
+                txn = await release_payment(
+                    escrow_txn_id=escrow_txn_id,
+                    payee_id=agent_id,
+                    payee_wallet=agent.get("wallet_address", "") if agent else "",
+                    amount_usd=partial_amount,
+                )
+                payment_result["status"] = "partial"
+                payment_result["amount"] = partial_amount
+
+                if agent:
+                    await db_update_agent(agent_id, {
+                        "jobs_completed": agent.get("jobs_completed", 0) + 1,
+                        "total_earned_usd": agent.get("total_earned_usd", 0) + partial_amount,
+                    })
+            except Exception as e:
+                payment_result["error"] = str(e)
+
+        else:  # reject
+            try:
+                txn = await refund_payment(escrow_txn_id)
+                payment_result["status"] = "refunded"
+                payment_result["amount"] = agreed_price
+
+                if agent:
+                    await db_update_agent(agent_id, {
+                        "jobs_failed": agent.get("jobs_failed", 0) + 1,
+                    })
+            except Exception as e:
+                payment_result["error"] = str(e)
+
+        # Update agent rating
+        if agent:
+            old_rating = agent.get("rating_avg", 0)
+            old_count = agent.get("rating_count", 0)
+            new_count = old_count + 1
+            new_rating = ((old_rating * old_count) + (final_rating * 5)) / new_count
+            await db_update_agent(agent_id, {
+                "rating_avg": min(5.0, new_rating),
+                "rating_count": new_count,
+            })
+
+        # Display result
+        status_color = {"released": "green", "partial": "yellow", "refunded": "red"}.get(
+            payment_result.get("status"), "white"
+        )
+
+        panel = Panel(
+            f"""[bold]Job:[/] {job_id}
+[bold]Decision:[/] {decision.upper()}
+[bold]Rating:[/] {final_rating:.0%}
+[bold]Feedback:[/] {feedback or '(none)'}
+
+[bold]Payment Status:[/] [{status_color}]{payment_result.get('status', 'error')}[/]
+[bold]Amount:[/] ${payment_result.get('amount', 0):.2f}""",
+            title=f"[{status_color}]Review Submitted[/]",
+        )
+        console.print(panel)
+
+        if payment_result.get("error"):
+            console.print(f"[red]Payment error: {payment_result['error']}[/]")
+
+    run_async(_submit())
+
+
+# ============================================================
 # Demo Command
 # ============================================================
 
 @app.command()
 def demo():
-    """Run the full AgentBazaar demo flow."""
-    from .db import setup_indexes
+    """Run the full AgentBazaar demo flow with human-in-the-loop review."""
+    from .db import setup_indexes, get_job, get_agent, update_job, update_agent as db_update_agent
     from .registry import register_agent
     from .jobs import create_job
     from .jobs.match import find_matching_agents
     from .bidding import submit_bid, accept_bid, rank_bids
     from .execution import execute_job
-    from .payments import process_job_payment
+    from .models import JobStatus
+    from .payments.release import release_payment
+    from datetime import datetime
 
     async def _demo():
         console.print(Panel.fit(
             "[bold cyan]AgentBazaar Demo[/]\n"
-            "AI Agent Marketplace with Verified Capabilities & x402 Payments",
+            "AI Agent Marketplace with Human-in-the-Loop Quality Review",
             border_style="cyan",
         ))
 
@@ -539,23 +812,83 @@ def demo():
         with Progress(SpinnerColumn(), TextColumn("Agent working..."), console=console):
             exec_result = await execute_job(job.job_id)
 
-        if exec_result.get("status") == "completed":
-            console.print(f"  [green]Completed![/] Quality: {exec_result['quality_score']:.2f}")
+        status = exec_result.get("status")
+        if status == "pending_review":
+            ai_suggestion = exec_result.get("ai_quality_suggestion", {})
+            suggested_score = ai_suggestion.get("suggested_overall", 0) if ai_suggestion else 0
+            recommendation = ai_suggestion.get("recommendation", "N/A") if ai_suggestion else "N/A"
             summary = exec_result.get("result", {}).get("summary", "No summary")
+
+            console.print(f"  [cyan]Work complete - pending human review[/]")
+            console.print(f"  AI Suggestion: {suggested_score:.0%} ({recommendation})")
             console.print(f"  Summary: {summary[:100]}...")
+        elif status == "completed":
+            console.print(f"  [green]Completed![/]")
         else:
             console.print(f"  [red]Failed:[/] {exec_result.get('error')}")
+            return
+
+        # Human Review (simulated acceptance)
+        console.print("\n[bold]Step 8: Human Reviews Work[/]")
+        console.print("  [cyan]Reviewing AI suggestion...[/]")
+
+        # Re-fetch job to get latest state
+        job_data = await get_job(job.job_id)
+        ai_suggestion = job_data.get("ai_quality_suggestion", {})
+
+        if ai_suggestion:
+            console.print(f"  AI recommends: [bold]{ai_suggestion.get('recommendation', 'N/A').upper()}[/]")
+            console.print(f"  Strengths: {', '.join(ai_suggestion.get('strengths', []))}")
+            if ai_suggestion.get("improvements"):
+                console.print(f"  Improvements: {', '.join(ai_suggestion.get('improvements', []))}")
+            if ai_suggestion.get("red_flags"):
+                console.print(f"  [red]Red Flags: {', '.join(ai_suggestion.get('red_flags', []))}[/]")
+
+        # Simulate human accepting the work
+        human_decision = "accept"  # In real usage, this would be user input
+        human_rating = 0.9  # Human's quality rating
+
+        console.print(f"\n  [green]Human Decision: ACCEPT[/]")
+        console.print(f"  Human Rating: {human_rating:.0%}")
+
+        # Process the review
+        await update_job(job.job_id, {
+            "status": JobStatus.COMPLETED.value,
+            "quality_score": human_rating,
+            "human_review_decision": human_decision,
+            "human_review_rating": human_rating,
+            "human_review_feedback": "Good work on the analysis!",
+            "reviewed_by": "demo_poster",
+            "reviewed_at": datetime.utcnow(),
+            "completed_at": datetime.utcnow(),
+        })
 
         # Process payment
-        console.print("\n[bold]Step 8: Process Payment (x402)[/]")
-        payment = await process_job_payment(job.job_id)
-        status = payment.get("payment_status")
-        if status == "released":
-            console.print(f"  [green]Payment released:[/] ${payment.get('amount_paid', 0):.2f}")
-        elif status == "partial":
-            console.print(f"  [yellow]Partial payment:[/] ${payment.get('amount_paid', 0):.2f}")
+        console.print("\n[bold]Step 9: Process Payment (x402)[/]")
+        escrow_txn_id = job_data.get("escrow_txn_id")
+        agent_id = job_data.get("assigned_agent_id")
+        agent = await get_agent(agent_id) if agent_id else None
+        agreed_price = job_data.get("final_price_usd") or job_data.get("budget_usd", 0)
+
+        if escrow_txn_id and agent:
+            try:
+                txn = await release_payment(
+                    escrow_txn_id=escrow_txn_id,
+                    payee_id=agent_id,
+                    payee_wallet=agent.get("wallet_address", ""),
+                    amount_usd=agreed_price,
+                )
+                console.print(f"  [green]Payment released:[/] ${agreed_price:.2f}")
+
+                # Update agent stats
+                await db_update_agent(agent_id, {
+                    "jobs_completed": agent.get("jobs_completed", 0) + 1,
+                    "total_earned_usd": agent.get("total_earned_usd", 0) + agreed_price,
+                })
+            except Exception as e:
+                console.print(f"  [red]Payment error:[/] {e}")
         else:
-            console.print(f"  [red]Refunded[/]")
+            console.print(f"  [yellow]No escrow to release (simulated mode)[/]")
 
         # Summary
         console.print("\n" + "=" * 50)
@@ -565,8 +898,10 @@ def demo():
             f"Posted [cyan]1[/] job with [cyan]${job.budget_usd:.2f}[/] escrow\n"
             f"Received [cyan]{len(bids)}[/] bids\n"
             f"Winner: [cyan]{best_bid.get('agent_name')}[/]\n"
-            f"Quality: [cyan]{exec_result.get('quality_score', 0):.2f}[/]\n"
-            f"Payment: [green]${payment.get('amount_paid', 0):.2f}[/]",
+            f"AI Suggested: [cyan]{ai_suggestion.get('suggested_overall', 0):.0%}[/] ({ai_suggestion.get('recommendation', 'N/A')})\n"
+            f"Human Rating: [cyan]{human_rating:.0%}[/]\n"
+            f"Human Decision: [green]ACCEPT[/]\n"
+            f"Payment: [green]${agreed_price:.2f}[/]",
             title="Summary",
             border_style="green",
         ))

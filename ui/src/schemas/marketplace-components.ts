@@ -32,6 +32,7 @@ export const JobStatusSchema = z.enum([
   "awaiting_approval",
   "assigned",
   "in_progress",
+  "pending_review",  // Work done, awaiting human quality review
   "completed",
   "disputed",
   "cancelled",
@@ -120,6 +121,52 @@ export const ApprovalQueueSchema = z.object({
 });
 
 // ============================================================
+// Human Review Components (Quality Rating)
+// ============================================================
+
+export const AIQualitySuggestionSchema = z.object({
+  scores: z.object({
+    relevance: z.number().min(0).max(1).describe("Relevance score"),
+    accuracy: z.number().min(0).max(1).describe("Accuracy score"),
+    completeness: z.number().min(0).max(1).describe("Completeness score"),
+    clarity: z.number().min(0).max(1).describe("Clarity score"),
+    actionability: z.number().min(0).max(1).describe("Actionability score"),
+  }).describe("Individual quality scores"),
+  suggested_overall: z.number().min(0).max(1).describe("AI's suggested overall score"),
+  recommendation: z.enum(["accept", "partial", "reject"]).describe("AI's recommendation"),
+  feedback: z.string().describe("AI's detailed feedback for the reviewer"),
+  strengths: z.array(z.string()).describe("What the agent did well"),
+  improvements: z.array(z.string()).describe("What could be improved"),
+  red_flags: z.array(z.string()).describe("Concerning issues (empty if none)"),
+});
+
+export const PendingReviewSchema = z.object({
+  job_id: z.string().describe("Job ID awaiting review"),
+  title: z.string().describe("Job title"),
+  description: z.string().optional().describe("Job description"),
+  agent_id: z.string().describe("Agent who completed the work"),
+  agent_name: z.string().describe("Agent name"),
+  budget_usd: z.number().describe("Job budget"),
+  result: z.any().optional().describe("Agent's work result"),
+  ai_quality_suggestion: AIQualitySuggestionSchema.optional().describe("AI's quality suggestion"),
+});
+
+export const ReviewQueueSchema = z.object({
+  pending_reviews: z.array(PendingReviewSchema).describe("List of jobs awaiting human review"),
+});
+
+export const JobReviewPanelSchema = z.object({
+  job_id: z.string().describe("Job being reviewed"),
+  title: z.string().describe("Job title"),
+  description: z.string().describe("Job description"),
+  result: z.any().describe("Agent's work result"),
+  agent_id: z.string().describe("Agent ID"),
+  agent_name: z.string().describe("Agent name"),
+  budget_usd: z.number().describe("Job budget"),
+  ai_suggestion: AIQualitySuggestionSchema.describe("AI's quality suggestion to help reviewer"),
+});
+
+// ============================================================
 // Transaction Components
 // ============================================================
 
@@ -172,6 +219,8 @@ export const PageTypeSchema = z.enum([
   "post_job",
   "negotiations",
   "approvals",
+  "reviews",  // Human quality review page
+  "job_review",  // Single job review page
   "transaction_history",
 ]);
 
@@ -207,6 +256,8 @@ export const componentSchemas = {
   BidCard: BidCardSchema,
   NegotiationPanel: NegotiationPanelSchema,
   ApprovalQueue: ApprovalQueueSchema,
+  ReviewQueue: ReviewQueueSchema,
+  JobReviewPanel: JobReviewPanelSchema,
   TransactionDetails: TransactionDetailsSchema,
   PostJobForm: PostJobFormSchema,
   CounterOfferForm: CounterOfferFormSchema,
@@ -221,6 +272,10 @@ export type JobCardProps = z.infer<typeof JobCardSchema>;
 export type BidCardProps = z.infer<typeof BidCardSchema>;
 export type NegotiationPanelProps = z.infer<typeof NegotiationPanelSchema>;
 export type ApprovalQueueProps = z.infer<typeof ApprovalQueueSchema>;
+export type ReviewQueueProps = z.infer<typeof ReviewQueueSchema>;
+export type JobReviewPanelProps = z.infer<typeof JobReviewPanelSchema>;
+export type AIQualitySuggestionProps = z.infer<typeof AIQualitySuggestionSchema>;
+export type PendingReviewProps = z.infer<typeof PendingReviewSchema>;
 export type TransactionDetailsProps = z.infer<typeof TransactionDetailsSchema>;
 export type PostJobFormProps = z.infer<typeof PostJobFormSchema>;
 export type CounterOfferFormProps = z.infer<typeof CounterOfferFormSchema>;

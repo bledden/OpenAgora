@@ -67,85 +67,6 @@ from .webhooks import notify_agents_of_job, notify_bid_selected
 load_dotenv()
 logger = structlog.get_logger()
 
-# Mock data for development when MongoDB is unavailable
-MOCK_AGENTS = [
-    {
-        "agent_id": "agent_alpha_001",
-        "name": "DataAnalyzer Pro",
-        "description": "Specialized in data extraction, sentiment analysis, and pattern recognition. High accuracy with structured data processing.",
-        "capabilities": {"data_extraction": 0.95, "sentiment_analysis": 0.88, "pattern_recognition": 0.92, "summarization": 0.85},
-        "rating_avg": 4.8,
-        "rating_count": 127,
-        "jobs_completed": 156,
-        "jobs_failed": 3,
-        "base_rate_usd": 2.50,
-        "status": "available",
-        "total_earned_usd": 1250.00,
-    },
-    {
-        "agent_id": "agent_beta_002",
-        "name": "CodeReview Assistant",
-        "description": "Expert code reviewer with deep understanding of security vulnerabilities and best practices across multiple languages.",
-        "capabilities": {"code_review": 0.94, "pattern_recognition": 0.89, "classification": 0.86, "anomaly_detection": 0.91},
-        "rating_avg": 4.6,
-        "rating_count": 89,
-        "jobs_completed": 98,
-        "jobs_failed": 5,
-        "base_rate_usd": 3.00,
-        "status": "available",
-        "total_earned_usd": 890.00,
-    },
-    {
-        "agent_id": "agent_gamma_003",
-        "name": "ContentSummarizer",
-        "description": "Fast and accurate document summarization with support for multiple languages and content types.",
-        "capabilities": {"summarization": 0.96, "aggregation": 0.90, "classification": 0.84, "data_extraction": 0.82},
-        "rating_avg": 4.9,
-        "rating_count": 203,
-        "jobs_completed": 245,
-        "jobs_failed": 2,
-        "base_rate_usd": 1.75,
-        "status": "busy",
-        "total_earned_usd": 2100.00,
-    },
-]
-
-MOCK_JOBS = [
-    {
-        "job_id": "job_abc123",
-        "title": "Analyze Q4 Sales Report",
-        "description": "Extract key metrics, trends, and insights from the quarterly sales data. Identify top performing products and regions.",
-        "budget_usd": 15.00,
-        "status": "posted",
-        "required_capabilities": ["data_extraction", "pattern_recognition", "summarization"],
-        "poster_id": "user_demo",
-        "created_at": "2026-01-10T10:00:00Z",
-    },
-    {
-        "job_id": "job_def456",
-        "title": "Security Code Review for Auth Module",
-        "description": "Review the authentication module for potential security vulnerabilities and suggest improvements.",
-        "budget_usd": 25.00,
-        "status": "bidding",
-        "required_capabilities": ["code_review", "anomaly_detection"],
-        "poster_id": "user_enterprise",
-        "created_at": "2026-01-10T09:30:00Z",
-    },
-    {
-        "job_id": "job_ghi789",
-        "title": "Summarize Research Papers",
-        "description": "Summarize 10 academic papers on machine learning optimization techniques. Need concise abstracts and key findings.",
-        "budget_usd": 8.00,
-        "status": "in_progress",
-        "required_capabilities": ["summarization", "aggregation"],
-        "poster_id": "user_researcher",
-        "assigned_agent_id": "agent_gamma_003",
-        "created_at": "2026-01-10T08:00:00Z",
-    },
-]
-
-USE_MOCK_DATA = False  # Will be set True if MongoDB connection fails
-
 app = FastAPI(
     title="Open Agora",
     description="AI Agent Marketplace with x402 Payments and Generative UI",
@@ -282,15 +203,14 @@ async def verify_auth(request: AuthVerifyRequest):
 
     # Look up if this wallet owns an agent
     agent_id = None
-    if not USE_MOCK_DATA:
-        agents = await get_all_agents()
-        for agent in agents:
-            if agent.get("wallet_address", "").lower() == request.wallet.lower():
-                agent_id = agent.get("agent_id")
-                break
-            if agent.get("owner_id", "").lower() == request.wallet.lower():
-                agent_id = agent.get("agent_id")
-                break
+    agents = await get_all_agents()
+    for agent in agents:
+        if agent.get("wallet_address", "").lower() == request.wallet.lower():
+            agent_id = agent.get("agent_id")
+            break
+        if agent.get("owner_id", "").lower() == request.wallet.lower():
+            agent_id = agent.get("agent_id")
+            break
 
     session_token = create_session(request.wallet, agent_id)
 
@@ -321,7 +241,7 @@ async def get_current_user(auth: AuthenticatedAgent = Depends(require_auth)):
     }
 
     # If they own an agent, include agent details
-    if auth.agent_id and not USE_MOCK_DATA:
+    if auth.agent_id:
         agent = await get_agent(auth.agent_id)
         if agent:
             result["agent"] = agent
@@ -335,16 +255,8 @@ async def get_current_user(auth: AuthenticatedAgent = Depends(require_auth)):
 
 @app.on_event("startup")
 async def startup():
-    global USE_MOCK_DATA
-    try:
-        await init_db()
-        # Test the connection by trying to list agents
-        await get_all_agents()
-        logger.info("agentbazaar_api_started", mode="database")
-    except Exception as e:
-        logger.warning("mongodb_unavailable", error=str(e)[:100], mode="mock_data")
-        USE_MOCK_DATA = True
-        logger.info("agentbazaar_api_started", mode="mock_data")
+    await init_db()
+    logger.info("agentbazaar_api_started")
 
 
 @app.get("/")
@@ -364,8 +276,6 @@ def root():
 @app.get("/api/agents")
 async def list_agents():
     """Get all registered agents."""
-    if USE_MOCK_DATA:
-        return {"agents": MOCK_AGENTS, "count": len(MOCK_AGENTS)}
     agents = await get_all_agents()
     return {"agents": agents, "count": len(agents)}
 
@@ -373,11 +283,6 @@ async def list_agents():
 @app.get("/api/agents/{agent_id}")
 async def get_agent_details(agent_id: str):
     """Get details for a specific agent."""
-    if USE_MOCK_DATA:
-        agent = next((a for a in MOCK_AGENTS if a["agent_id"] == agent_id), None)
-        if not agent:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        return agent
     agent = await get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -400,12 +305,6 @@ async def register_agent(request: AgentRegisterRequest):
 
     Rate limited to 1 registration per owner per 5 minutes.
     """
-    if USE_MOCK_DATA:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent registration requires database connection. Currently in mock mode."
-        )
-
     # Rate limiting check
     now = datetime.utcnow()
     last_registration = _registration_cooldowns.get(request.owner_id)
@@ -471,12 +370,6 @@ async def update_agent(
     Allows agents to update their name, description, pricing, status, and webhook URL.
     Requires authentication - caller must own the agent.
     """
-    if USE_MOCK_DATA:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent updates require database connection. Currently in mock mode."
-        )
-
     # Verify agent exists
     agent = await get_agent(agent_id)
     if not agent:
@@ -538,15 +431,6 @@ async def agent_heartbeat(
 
     Requires authentication - caller must own the agent.
     """
-    if USE_MOCK_DATA:
-        # In mock mode, just return success for testing
-        return {
-            "success": True,
-            "agent_id": agent_id,
-            "status": request.status,
-            "message": "Heartbeat received (mock mode)",
-        }
-
     # Verify agent exists
     agent = await get_agent(agent_id)
     if not agent:
@@ -599,12 +483,6 @@ async def agent_heartbeat(
 @app.get("/api/agents/{agent_id}/jobs")
 async def get_agent_jobs(agent_id: str, status: Optional[str] = None):
     """Get jobs assigned to or completed by this agent."""
-    if USE_MOCK_DATA:
-        jobs = [j for j in MOCK_JOBS if j.get("assigned_agent_id") == agent_id]
-        if status:
-            jobs = [j for j in jobs if j.get("status") == status]
-        return {"jobs": jobs, "count": len(jobs)}
-
     # Verify agent exists
     agent = await get_agent(agent_id)
     if not agent:
@@ -621,11 +499,6 @@ async def get_agent_jobs(agent_id: str, status: Optional[str] = None):
 @app.get("/api/jobs")
 async def list_jobs(status: Optional[str] = None):
     """Get all jobs, optionally filtered by status."""
-    if USE_MOCK_DATA:
-        jobs = MOCK_JOBS
-        if status:
-            jobs = [j for j in jobs if j.get("status") == status]
-        return {"jobs": jobs, "count": len(jobs)}
     jobs = await get_all_jobs()
     if status:
         jobs = [j for j in jobs if j.get("status") == status]
@@ -635,12 +508,6 @@ async def list_jobs(status: Optional[str] = None):
 @app.get("/api/jobs/{job_id}")
 async def get_job_details(job_id: str):
     """Get details for a specific job."""
-    if USE_MOCK_DATA:
-        job = next((j for j in MOCK_JOBS if j["job_id"] == job_id), None)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-        job["bids"] = []
-        return job
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -656,22 +523,6 @@ async def get_job_details(job_id: str):
 async def create_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
     """Create a new job and escrow payment."""
     job_id = f"job_{uuid.uuid4().hex[:8]}"
-
-    if USE_MOCK_DATA:
-        # In mock mode, just add to the in-memory list
-        new_job = {
-            "job_id": job_id,
-            "title": request.title,
-            "description": request.description,
-            "budget_usd": request.budget_usd,
-            "status": "posted",
-            "required_capabilities": request.required_capabilities,
-            "poster_id": request.poster_id,
-            "created_at": datetime.utcnow().isoformat() + "Z",
-        }
-        MOCK_JOBS.insert(0, new_job)
-        logger.info("job_created", job_id=job_id, mode="mock_data")
-        return {"job_id": job_id, "status": "posted", "message": "Job created (mock mode)"}
 
     job = BazaarJob(
         job_id=job_id,
@@ -800,6 +651,14 @@ class AutoNegotiateRequest(BaseModel):
     negotiator_role: str = "poster"
 
 
+class HumanReviewRequest(BaseModel):
+    """Human reviewer's decision on completed work."""
+    decision: str  # "accept", "partial", "reject"
+    rating: float  # 0.0 to 1.0 (human's quality rating)
+    feedback: str = ""  # Human's comments
+    reviewer_id: str  # Who is reviewing
+
+
 @app.post("/api/bids/{bid_id}/counter")
 async def counter_offer_endpoint(bid_id: str, request: CounterOfferRequest):
     """Make a counter-offer on a bid."""
@@ -885,6 +744,213 @@ async def list_pending_approvals():
     """Get all bids awaiting human approval."""
     bids = await get_pending_approvals()
     return {"pending_approvals": bids, "count": len(bids)}
+
+
+# ============================================================
+# Human Review Endpoints (Quality Rating)
+# ============================================================
+
+@app.get("/api/reviews/pending")
+async def list_pending_reviews():
+    """Get all jobs awaiting human quality review.
+
+    These are jobs where work is completed but the human poster
+    hasn't yet reviewed and rated the quality.
+    """
+    jobs = await get_all_jobs()
+    pending = [j for j in jobs if j.get("status") == JobStatus.PENDING_REVIEW.value]
+
+    # Enrich with agent info
+    for job in pending:
+        agent_id = job.get("assigned_agent_id")
+        if agent_id:
+            agent = await get_agent(agent_id)
+            if agent:
+                job["agent_name"] = agent.get("name", agent_id)
+
+    return {"pending_reviews": pending, "count": len(pending)}
+
+
+@app.get("/api/jobs/{job_id}/review")
+async def get_job_for_review(job_id: str):
+    """Get job details including AI quality suggestion for human review."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.get("status") != JobStatus.PENDING_REVIEW.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is not pending review (status: {job.get('status')})"
+        )
+
+    # Get agent info
+    agent_id = job.get("assigned_agent_id")
+    agent = await get_agent(agent_id) if agent_id else None
+
+    return {
+        "job_id": job_id,
+        "title": job.get("title"),
+        "description": job.get("description"),
+        "result": job.get("result"),
+        "ai_quality_suggestion": job.get("ai_quality_suggestion"),
+        "agent_id": agent_id,
+        "agent_name": agent.get("name") if agent else None,
+        "budget_usd": job.get("budget_usd"),
+        "status": job.get("status"),
+    }
+
+
+@app.post("/api/jobs/{job_id}/review")
+async def submit_human_review(job_id: str, request: HumanReviewRequest):
+    """Submit human review decision for a completed job.
+
+    This is where the human makes the FINAL decision on:
+    1. Whether to accept, partially accept, or reject the work
+    2. The final quality rating (0.0 to 1.0)
+    3. Feedback for the agent
+
+    Based on the decision, payment is processed accordingly.
+    """
+    from .payments.release import release_payment
+    from .payments.refund import refund_payment, partial_refund
+
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.get("status") != JobStatus.PENDING_REVIEW.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is not pending review (status: {job.get('status')})"
+        )
+
+    # Validate decision
+    if request.decision not in ["accept", "partial", "reject"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Decision must be 'accept', 'partial', or 'reject'"
+        )
+
+    # Validate rating
+    if not (0.0 <= request.rating <= 1.0):
+        raise HTTPException(status_code=400, detail="Rating must be between 0.0 and 1.0")
+
+    # Update job with human review
+    await update_job(job_id, {
+        "status": JobStatus.COMPLETED.value,
+        "quality_score": request.rating,  # Human's final rating
+        "human_review_decision": request.decision,
+        "human_review_rating": request.rating,
+        "human_review_feedback": request.feedback,
+        "reviewed_by": request.reviewer_id,
+        "reviewed_at": datetime.utcnow(),
+        "completed_at": datetime.utcnow(),
+    })
+
+    # Process payment based on human decision
+    escrow_txn_id = job.get("escrow_txn_id")
+    agent_id = job.get("assigned_agent_id")
+    agent = await get_agent(agent_id) if agent_id else None
+    agreed_price = job.get("final_price_usd") or job.get("budget_usd", 0)
+
+    payment_result = {"decision": request.decision}
+
+    if not escrow_txn_id:
+        payment_result["error"] = "No escrow found"
+    elif request.decision == "accept":
+        # Full payment
+        try:
+            txn = await release_payment(
+                escrow_txn_id=escrow_txn_id,
+                payee_id=agent_id,
+                payee_wallet=agent.get("wallet_address", "") if agent else "",
+                amount_usd=agreed_price,
+            )
+            payment_result["payment_status"] = "released"
+            payment_result["amount_paid"] = agreed_price
+            payment_result["txn_id"] = txn.txn_id
+
+            # Update agent stats
+            if agent:
+                await db_update_agent(agent_id, {
+                    "jobs_completed": agent.get("jobs_completed", 0) + 1,
+                    "total_earned_usd": agent.get("total_earned_usd", 0) + agreed_price,
+                })
+        except Exception as e:
+            payment_result["error"] = str(e)
+
+    elif request.decision == "partial":
+        # 50% payment
+        partial_amount = agreed_price * 0.5
+        try:
+            txn = await release_payment(
+                escrow_txn_id=escrow_txn_id,
+                payee_id=agent_id,
+                payee_wallet=agent.get("wallet_address", "") if agent else "",
+                amount_usd=partial_amount,
+            )
+            payment_result["payment_status"] = "partial"
+            payment_result["amount_paid"] = partial_amount
+            payment_result["txn_id"] = txn.txn_id
+
+            # Update agent stats (partial completion)
+            if agent:
+                await db_update_agent(agent_id, {
+                    "jobs_completed": agent.get("jobs_completed", 0) + 1,
+                    "total_earned_usd": agent.get("total_earned_usd", 0) + partial_amount,
+                })
+        except Exception as e:
+            payment_result["error"] = str(e)
+
+    else:  # reject
+        # Full refund
+        try:
+            txn = await refund_payment(escrow_txn_id)
+            payment_result["payment_status"] = "refunded"
+            payment_result["amount_refunded"] = agreed_price
+            payment_result["txn_id"] = txn.txn_id if txn else None
+
+            # Update agent stats (failed job)
+            if agent:
+                await db_update_agent(agent_id, {
+                    "jobs_failed": agent.get("jobs_failed", 0) + 1,
+                })
+        except Exception as e:
+            payment_result["error"] = str(e)
+
+    # Update agent rating based on human review
+    if agent:
+        old_rating = agent.get("rating_avg", 0)
+        old_count = agent.get("rating_count", 0)
+        new_count = old_count + 1
+        new_rating = ((old_rating * old_count) + (request.rating * 5)) / new_count  # Convert 0-1 to 0-5
+        await db_update_agent(agent_id, {
+            "rating_avg": min(5.0, new_rating),  # Cap at 5
+            "rating_count": new_count,
+        })
+
+    logger.info(
+        "human_review_submitted",
+        job_id=job_id,
+        decision=request.decision,
+        rating=request.rating,
+        reviewer=request.reviewer_id,
+        payment_status=payment_result.get("payment_status"),
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "completed",
+        "human_review": {
+            "decision": request.decision,
+            "rating": request.rating,
+            "feedback": request.feedback,
+            "reviewer": request.reviewer_id,
+        },
+        "payment": payment_result,
+        "message": f"Review submitted. Payment {payment_result.get('payment_status', 'processing')}.",
+    }
 
 
 # ============================================================

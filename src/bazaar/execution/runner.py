@@ -11,7 +11,7 @@ from ..models import JobStatus, AgentStatus
 from ..db import get_job, get_agent, update_job, update_agent, get_collection
 from ..llm import call_fireworks_json
 from ..config import get_settings
-from .quality import evaluate_quality
+from .quality import get_quality_suggestion, get_payment_recommendation
 
 logger = structlog.get_logger()
 
@@ -97,33 +97,37 @@ async def execute_job(job_id: str) -> dict:
 
         execution_time_ms = (time.time() - start_time) * 1000
 
-        # Evaluate quality
-        quality_score = await evaluate_quality(
+        # Get AI quality suggestion (human will make final decision)
+        ai_suggestion = await get_quality_suggestion(
             task_type=job.get("task_type", "analysis"),
             task_description=job.get("description", ""),
             result=result,
         )
 
-        # Update job with results
+        # Get payment recommendation (also just a suggestion)
+        payment_recommendation = get_payment_recommendation(ai_suggestion)
+
+        # Update job to PENDING_REVIEW status (not COMPLETED yet)
+        # Human must review and make final decision
         await update_job(job_id, {
-            "status": JobStatus.COMPLETED.value,
+            "status": JobStatus.PENDING_REVIEW.value,
             "result": result,
-            "quality_score": quality_score,
-            "completed_at": datetime.utcnow(),
+            "ai_quality_suggestion": ai_suggestion,
+            # quality_score will be set by human reviewer
         })
 
-        # Update agent status
+        # Update agent status (back to available while awaiting review)
         await update_agent(agent_id, {
             "status": AgentStatus.AVAILABLE.value,
             "last_active": datetime.utcnow(),
-            "jobs_completed": agent.get("jobs_completed", 0) + 1,
         })
 
         logger.info(
-            "job_execution_completed",
+            "job_pending_review",
             job_id=job_id,
             agent_id=agent_id,
-            quality_score=quality_score,
+            ai_suggested_score=ai_suggestion.get("suggested_overall"),
+            ai_recommendation=ai_suggestion.get("recommendation"),
             execution_time_ms=execution_time_ms,
         )
 
@@ -131,9 +135,11 @@ async def execute_job(job_id: str) -> dict:
             "job_id": job_id,
             "agent_id": agent_id,
             "result": result,
-            "quality_score": quality_score,
+            "ai_quality_suggestion": ai_suggestion,
+            "payment_recommendation": payment_recommendation,
             "execution_time_ms": execution_time_ms,
-            "status": "completed",
+            "status": "pending_review",
+            "message": "Work completed. Awaiting human review to finalize quality rating and payment.",
         }
 
     except Exception as e:

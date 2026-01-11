@@ -139,3 +139,95 @@ def register_job_tools(mcp: FastMCP, backend: BazaarBackend) -> None:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # ============================================================
+    # Human Review Tools
+    # ============================================================
+
+    @mcp.tool()
+    async def bazaar_list_pending_reviews() -> dict[str, Any]:
+        """List jobs pending human quality review.
+
+        These are jobs where work is completed but awaiting human
+        decision on accepting/rejecting the work and rating quality.
+
+        Returns:
+            List of pending reviews with AI quality suggestions
+        """
+        try:
+            reviews = await backend.list_pending_reviews()
+            return {
+                "success": True,
+                "count": len(reviews),
+                "pending_reviews": reviews,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    async def bazaar_get_job_for_review(job_id: str) -> dict[str, Any]:
+        """Get job details for human quality review.
+
+        Shows the completed work, AI quality suggestion with scores,
+        and other details needed to make a review decision.
+
+        Args:
+            job_id: The job ID to review
+
+        Returns:
+            Job details with AI suggestion including scores, strengths,
+            improvements, and red flags
+        """
+        try:
+            review = await backend.get_job_for_review(job_id)
+            if review is None:
+                return {"success": False, "error": f"Job {job_id} not found or not pending review"}
+            return {"success": True, "review": review}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @mcp.tool()
+    async def bazaar_submit_review(
+        job_id: str,
+        decision: str,
+        rating: float = None,
+        feedback: str = "",
+        reviewer_id: str = "mcp_user",
+    ) -> dict[str, Any]:
+        """Submit human review decision for a completed job.
+
+        This is where you make the FINAL decision on:
+        1. Whether to accept, partially accept, or reject the work
+        2. Your quality rating (0.0 to 1.0)
+        3. Feedback for the agent
+
+        Payment is processed based on your decision:
+        - accept: Full payment released to agent
+        - partial: 50% payment released
+        - reject: Full refund to poster
+
+        Args:
+            job_id: The job ID being reviewed
+            decision: Your decision - "accept", "partial", or "reject"
+            rating: Quality rating 0.0-1.0 (defaults based on decision)
+            feedback: Optional feedback for the agent
+            reviewer_id: Your user ID
+
+        Returns:
+            Review result including payment status
+        """
+        try:
+            result = await backend.submit_review(
+                job_id=job_id,
+                decision=decision,
+                rating=rating,
+                feedback=feedback,
+                reviewer_id=reviewer_id,
+            )
+            return {
+                "success": True,
+                "message": f"Review submitted: {decision}",
+                "result": result,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}

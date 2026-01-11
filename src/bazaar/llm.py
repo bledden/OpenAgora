@@ -28,10 +28,22 @@ async def call_fireworks(
     system_prompt: Optional[str] = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    model: Optional[str] = None,
 ) -> LLMResponse:
-    """Call Fireworks AI for fast inference."""
+    """Call Fireworks AI for fast inference.
+
+    Args:
+        prompt: The user prompt
+        system_prompt: Optional system prompt
+        temperature: Sampling temperature (0-1)
+        max_tokens: Maximum tokens to generate
+        model: Model to use (defaults to config setting)
+    """
     settings = get_settings()
     start_time = time.time()
+
+    # Use provided model or fall back to config default
+    model_id = model or settings.fireworks_model
 
     messages = []
     if system_prompt:
@@ -46,7 +58,7 @@ async def call_fireworks(
                 "Content-Type": "application/json",
             },
             json={
-                "model": settings.fireworks_model,
+                "model": model_id,
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
@@ -62,7 +74,7 @@ async def call_fireworks(
         content=data["choices"][0]["message"]["content"],
         tokens_input=data.get("usage", {}).get("prompt_tokens", 0),
         tokens_output=data.get("usage", {}).get("completion_tokens", 0),
-        model=settings.fireworks_model,
+        model=model_id,
         latency_ms=latency_ms,
     )
 
@@ -71,6 +83,7 @@ async def call_fireworks_json(
     prompt: str,
     system_prompt: Optional[str] = None,
     temperature: float = 0.3,
+    model: Optional[str] = None,
 ) -> dict:
     """Call Fireworks and parse JSON response."""
     json_system = (system_prompt or "") + "\n\nRespond with valid JSON only. No markdown or explanation."
@@ -79,6 +92,7 @@ async def call_fireworks_json(
         prompt=prompt,
         system_prompt=json_system,
         temperature=temperature,
+        model=model,
     )
 
     content = response.content.strip()
@@ -184,8 +198,12 @@ async def call_llm(
     return response.content
 
 
-async def get_embedding(text: str) -> list[float]:
-    """Get Voyage AI embedding for text."""
+async def get_embedding(text: str, model: str = "voyage-3-large") -> list[float]:
+    """Get Voyage AI embedding for text.
+
+    Uses voyage-3-large by default - state-of-the-art general-purpose model
+    that outperforms OpenAI-v3-large by 9.74% across 100 datasets.
+    """
     settings = get_settings()
 
     async with httpx.AsyncClient() as client:
@@ -197,7 +215,7 @@ async def get_embedding(text: str) -> list[float]:
             },
             json={
                 "input": text,
-                "model": "voyage-2",
+                "model": model,
             },
             timeout=30.0,
         )
@@ -205,3 +223,53 @@ async def get_embedding(text: str) -> list[float]:
         data = response.json()
 
     return data["data"][0]["embedding"]
+
+
+async def get_embeddings_batch(texts: list[str], model: str = "voyage-3-large") -> list[list[float]]:
+    """Get Voyage AI embeddings for multiple texts in one call.
+
+    More efficient than multiple single calls for batch processing.
+    Includes retry logic for rate limiting.
+    """
+    import asyncio
+    settings = get_settings()
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://api.voyageai.com/v1/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {settings.voyage_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "input": texts,
+                        "model": model,
+                    },
+                    timeout=60.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            return [item["embedding"] for item in data["data"]]
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                logger.warning("voyage_rate_limited", attempt=attempt, wait_time=wait_time)
+                await asyncio.sleep(wait_time)
+            else:
+                raise
+
+
+def cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+    """Calculate cosine similarity between two vectors."""
+    import math
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot_product / (norm1 * norm2)

@@ -18,6 +18,13 @@ import {
   Clock,
   AlertCircle,
   X,
+  ClipboardCheck,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  ThumbsUp,
+  Minus,
+  Send,
 } from "lucide-react";
 
 // ============================================================
@@ -51,7 +58,32 @@ interface Job {
   created_at: string;
 }
 
-type ViewType = "home" | "agents" | "jobs" | "post-job";
+type ViewType = "home" | "agents" | "jobs" | "reviews" | "post-job";
+
+interface PendingReview {
+  job_id: string;
+  title: string;
+  description?: string;
+  agent_id: string;
+  agent_name: string;
+  budget_usd: number;
+  result?: unknown;
+  ai_quality_suggestion?: {
+    scores: {
+      relevance: number;
+      accuracy: number;
+      completeness: number;
+      clarity: number;
+      actionability: number;
+    };
+    suggested_overall: number;
+    recommendation: "accept" | "partial" | "reject";
+    feedback: string;
+    strengths: string[];
+    improvements: string[];
+    red_flags: string[];
+  };
+}
 
 // ============================================================
 // Utility Components
@@ -67,6 +99,7 @@ function StatusBadge({ status }: { status: string }) {
     negotiating: { bg: "bg-purple-500/15", text: "text-purple-400", label: "Negotiating" },
     assigned: { bg: "bg-indigo-500/15", text: "text-indigo-400", label: "Assigned" },
     in_progress: { bg: "bg-amber-500/15", text: "text-amber-400", label: "In Progress" },
+    pending_review: { bg: "bg-cyan-500/15", text: "text-cyan-400", label: "Pending Review" },
     completed: { bg: "bg-emerald-500/15", text: "text-emerald-400", label: "Completed" },
     cancelled: { bg: "bg-red-500/15", text: "text-red-400", label: "Cancelled" },
   };
@@ -98,11 +131,11 @@ function CapabilityBadge({ name, score }: { name: string; score?: number }) {
 function Header({
   currentView,
   onNavigate,
-  pendingApprovals: _pendingApprovals,
+  pendingReviews,
 }: {
   currentView: ViewType;
   onNavigate: (view: ViewType) => void;
-  pendingApprovals: number;
+  pendingReviews: number;
 }) {
   return (
     <header className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800">
@@ -138,6 +171,22 @@ function Header({
                 {item.label}
               </button>
             ))}
+            {/* Reviews with badge */}
+            <button
+              onClick={() => onNavigate("reviews")}
+              className={`relative px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                currentView === "reviews"
+                  ? "bg-slate-800 text-white"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+              }`}
+            >
+              Reviews
+              {pendingReviews > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-cyan-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  {pendingReviews}
+                </span>
+              )}
+            </button>
           </nav>
 
           {/* Right Actions */}
@@ -810,6 +859,157 @@ function JobsView({
 }
 
 // ============================================================
+// Reviews View
+// ============================================================
+
+function ReviewsView({
+  reviews,
+  loading,
+  onRefresh,
+  onReviewJob,
+}: {
+  reviews: PendingReview[];
+  loading: boolean;
+  onRefresh: () => void;
+  onReviewJob: (review: PendingReview) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="w-8 h-8 text-slate-500 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Pending Reviews</h1>
+          <p className="text-slate-500">{reviews.length} jobs awaiting your quality review</p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+        >
+          <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      {reviews.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
+          <CheckCircle className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+          <h3 className="text-lg font-semibold text-white mb-2">All Caught Up!</h3>
+          <p className="text-slate-400">No jobs pending quality review.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {reviews.map((review) => {
+            const aiSuggestion = review.ai_quality_suggestion;
+            const suggestedScore = aiSuggestion?.suggested_overall ?? 0.5;
+            const recommendation = aiSuggestion?.recommendation ?? "partial";
+            const hasRedFlags = aiSuggestion?.red_flags && aiSuggestion.red_flags.length > 0;
+
+            return (
+              <div
+                key={review.job_id}
+                className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-cyan-500/50 transition-colors"
+              >
+                <div className="flex items-start gap-4">
+                  {/* Left: Info */}
+                  <div className="flex-1">
+                    {/* Job Title */}
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                        <Briefcase className="w-5 h-5 text-indigo-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-white">{review.title}</h3>
+                        <p className="text-xs text-slate-500">Job #{review.job_id.slice(-6)}</p>
+                      </div>
+                    </div>
+
+                    {/* Agent Info */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <Bot className="w-4 h-4 text-purple-400" />
+                      <span className="text-sm text-slate-300">Completed by {review.agent_name}</span>
+                    </div>
+
+                    {/* AI Suggestion Summary */}
+                    {aiSuggestion && (
+                      <div className="flex items-center gap-4 mb-3">
+                        <div className="flex items-center gap-2">
+                          <Star className="w-4 h-4 text-amber-400" />
+                          <span className="text-sm text-slate-300">
+                            AI suggests: <span className="font-semibold text-white">{(suggestedScore * 100).toFixed(0)}%</span>
+                          </span>
+                        </div>
+                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                          recommendation === "accept"
+                            ? "bg-emerald-500/20 text-emerald-400"
+                            : recommendation === "partial"
+                            ? "bg-amber-500/20 text-amber-400"
+                            : "bg-red-500/20 text-red-400"
+                        }`}>
+                          {recommendation === "accept" ? "Accept" : recommendation === "partial" ? "Partial" : "Reject"}
+                        </span>
+                        {hasRedFlags && (
+                          <span className="px-2 py-1 bg-red-500/10 text-red-400 rounded-lg text-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {aiSuggestion.red_flags.length} flag{aiSuggestion.red_flags.length !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Budget */}
+                    <div className="flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-emerald-400" />
+                      <span className="text-lg font-bold text-emerald-400">
+                        {review.budget_usd.toFixed(2)}
+                      </span>
+                      <span className="text-sm text-slate-500">USD</span>
+                    </div>
+                  </div>
+
+                  {/* Right: Actions */}
+                  <button
+                    onClick={() => onReviewJob(review)}
+                    className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                  >
+                    <ClipboardCheck className="w-4 h-4" />
+                    Review Work
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Info Note */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <div className="flex items-start gap-3">
+          <ClipboardCheck className="w-5 h-5 text-slate-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-slate-300">
+              Review completed work and decide on payment.
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              AI provides quality suggestions, but you make the final decision on accepting work and rating quality.
+              Your rating affects the agent's reputation.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Main App
 // ============================================================
 
@@ -817,22 +1017,26 @@ export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>("home");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [agentsRes, jobsRes] = await Promise.all([
+      const [agentsRes, jobsRes, reviewsRes] = await Promise.all([
         fetch("/api/agents"),
         fetch("/api/jobs"),
+        fetch("/api/reviews/pending"),
       ]);
 
       const agentsData = await agentsRes.json();
       const jobsData = await jobsRes.json();
+      const reviewsData = await reviewsRes.json();
 
       setAgents(agentsData.agents || []);
       setJobs(jobsData.jobs || []);
+      setPendingReviews(reviewsData.pending_reviews || []);
     } catch (error) {
       console.error("Failed to fetch data:", error);
     } finally {
@@ -877,6 +1081,49 @@ export default function App() {
     console.log("View job:", job.job_id);
   };
 
+  const handleReviewJob = (review: PendingReview) => {
+    // For now, show an alert with review options
+    // In a full implementation, this would open a review modal or navigate to review detail page
+    const aiSuggestion = review.ai_quality_suggestion;
+    const message = aiSuggestion
+      ? `Review "${review.title}"\n\nAI Suggestion: ${(aiSuggestion.suggested_overall * 100).toFixed(0)}% - ${aiSuggestion.recommendation}\n\n${aiSuggestion.feedback}`
+      : `Review "${review.title}"`;
+
+    const decision = window.prompt(
+      `${message}\n\nEnter decision (accept/partial/reject):`,
+      aiSuggestion?.recommendation || "accept"
+    );
+
+    if (decision && ["accept", "partial", "reject"].includes(decision.toLowerCase())) {
+      submitReview(review.job_id, decision.toLowerCase() as "accept" | "partial" | "reject");
+    }
+  };
+
+  const submitReview = async (jobId: string, decision: "accept" | "partial" | "reject") => {
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          rating: decision === "accept" ? 1.0 : decision === "partial" ? 0.5 : 0.2,
+          feedback: `User ${decision}ed the work`,
+          reviewer_id: "demo_user",
+        }),
+      });
+
+      if (response.ok) {
+        fetchData(); // Refresh data after review
+      } else {
+        const error = await response.json();
+        alert(`Failed to submit review: ${error.detail || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Error submitting review:", error);
+      alert("Failed to submit review");
+    }
+  };
+
   const handleNavigate = (view: ViewType) => {
     if (view === "post-job") {
       setIsPostModalOpen(true);
@@ -903,7 +1150,7 @@ export default function App() {
       <Header
         currentView={currentView}
         onNavigate={handleNavigate}
-        pendingApprovals={0}
+        pendingReviews={pendingReviews.length}
       />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
@@ -934,6 +1181,15 @@ export default function App() {
             onView={handleViewJob}
             onRefresh={fetchData}
             onPostJob={() => setIsPostModalOpen(true)}
+          />
+        )}
+
+        {currentView === "reviews" && (
+          <ReviewsView
+            reviews={pendingReviews}
+            loading={loading}
+            onRefresh={fetchData}
+            onReviewJob={handleReviewJob}
           />
         )}
       </main>

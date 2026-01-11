@@ -13,6 +13,10 @@ export { NegotiationPanel } from "./NegotiationPanel";
 export { ApprovalQueue } from "./ApprovalQueue";
 export { TransactionDetails } from "./TransactionDetails";
 
+// Review components
+export { ReviewQueue } from "./ReviewQueue";
+export { JobReviewPanel } from "./JobReviewPanel";
+
 // Form components
 export { PostJobForm } from "./PostJobForm";
 export { CounterOfferForm } from "./CounterOfferForm";
