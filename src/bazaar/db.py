@@ -272,6 +272,47 @@ async def update_bid(bid_id: str, updates: dict) -> bool:
     return result.modified_count > 0
 
 
+async def get_pending_bids_by_agent(agent_id: str) -> list[dict]:
+    """Get all pending bids for an agent."""
+    collection = await get_collection(BIDS_COLLECTION)
+    cursor = collection.find({
+        "agent_id": agent_id,
+        "status": "pending"
+    })
+    bids = []
+    async for doc in cursor:
+        bids.append(serialize_doc(doc))
+    return bids
+
+
+async def cancel_pending_bids_by_agent(agent_id: str) -> int:
+    """Cancel all pending bids for an agent. Returns count cancelled."""
+    collection = await get_collection(BIDS_COLLECTION)
+    result = await collection.update_many(
+        {"agent_id": agent_id, "status": "pending"},
+        {"$set": {"status": "cancelled", "cancelled_reason": "agent_offline"}}
+    )
+    return result.modified_count
+
+
+async def get_stale_agents(stale_minutes: int = 5) -> list[dict]:
+    """Get agents that haven't sent a heartbeat in the specified minutes."""
+    from datetime import timedelta
+    cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
+    collection = await get_collection(AGENTS_COLLECTION)
+    cursor = collection.find({
+        "status": {"$in": ["available", "busy"]},
+        "$or": [
+            {"last_active": {"$lt": cutoff}},
+            {"last_active": {"$exists": False}}
+        ]
+    })
+    agents = []
+    async for doc in cursor:
+        agents.append(serialize_doc(doc))
+    return agents
+
+
 # ============================================================
 # Transaction Operations
 # ============================================================

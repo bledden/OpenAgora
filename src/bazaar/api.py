@@ -33,6 +33,8 @@ from .db import (
     create_job as db_create_job,
     update_job,
     update_agent as db_update_agent,
+    get_stale_agents,
+    cancel_pending_bids_by_agent,
 )
 from .registry.register import register_agent as do_register_agent
 from .models import BazaarJob, JobStatus, TransactionStatus
@@ -253,10 +255,57 @@ async def get_current_user(auth: AuthenticatedAgent = Depends(require_auth)):
 # Marketplace REST Endpoints
 # ============================================================
 
+# Background task for stale agent cleanup
+_cleanup_task = None
+
+async def cleanup_stale_agents_loop():
+    """Background task that marks stale agents as offline and cancels their bids."""
+    import asyncio
+    STALE_THRESHOLD_MINUTES = 5
+    CHECK_INTERVAL_SECONDS = 60
+
+    while True:
+        try:
+            stale_agents = await get_stale_agents(STALE_THRESHOLD_MINUTES)
+
+            for agent in stale_agents:
+                agent_id = agent.get("agent_id")
+                logger.info("marking_agent_offline", agent_id=agent_id, last_active=agent.get("last_active"))
+
+                # Mark agent as offline
+                await db_update_agent(agent_id, {"status": "offline"})
+
+                # Cancel all pending bids from this agent
+                cancelled_count = await cancel_pending_bids_by_agent(agent_id)
+                if cancelled_count > 0:
+                    logger.info("cancelled_stale_bids", agent_id=agent_id, count=cancelled_count)
+
+        except Exception as e:
+            logger.error("stale_agent_cleanup_error", error=str(e))
+
+        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
+
 @app.on_event("startup")
 async def startup():
+    import asyncio
+    global _cleanup_task
     await init_db()
-    logger.info("agentbazaar_api_started")
+    # Start background cleanup task
+    _cleanup_task = asyncio.create_task(cleanup_stale_agents_loop())
+    logger.info("agentbazaar_api_started", stale_agent_cleanup="enabled")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global _cleanup_task
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
+    logger.info("agentbazaar_api_stopped")
 
 
 @app.get("/")

@@ -230,6 +230,9 @@ For schemas, include comments explaining design decisions.
         while True:
             try:
                 async with httpx.AsyncClient() as client:
+                    # Send heartbeat to signal we're online and available
+                    await self._send_heartbeat(client)
+
                     # Get posted jobs (jobs awaiting bids)
                     response = await client.get(
                         f"{self.bazaar_api_url}/api/jobs",
@@ -247,6 +250,25 @@ For schemas, include comments explaining design decisions.
                 logger.warning("poll_error", error=str(e))
 
             await asyncio.sleep(interval_seconds)
+
+    async def _send_heartbeat(self, client: httpx.AsyncClient):
+        """Send heartbeat to marketplace to signal agent is online."""
+        try:
+            response = await client.post(
+                f"{self.bazaar_api_url}/api/agents/{self.config['agent_id']}/heartbeat",
+                json={
+                    "status": "available",
+                    "current_capacity": 1,
+                    "metadata": {"polling": True},
+                },
+                timeout=10.0,
+            )
+            if response.status_code == 200:
+                logger.debug("heartbeat_sent", agent_id=self.config["agent_id"])
+            else:
+                logger.warning("heartbeat_failed", status=response.status_code)
+        except Exception as e:
+            logger.warning("heartbeat_error", error=str(e))
 
     async def _consider_job(self, job: dict):
         """Consider bidding on a job."""
