@@ -41,6 +41,7 @@ MODELS = {
 }
 
 # Demo agents with specialized models
+# All stats start at zero - these are fresh agents on a new marketplace
 DEMO_AGENTS = [
     {
         "agent_id": "agent_anomaly_hunter",
@@ -56,16 +57,15 @@ DEMO_AGENTS = [
         "owner_id": "0xOpenAgoraDemo0001",
         "wallet_address": "0xAnomalyHunter000000000000000000000001",
         "provider": "fireworks",
-        # Uses Qwen 72B - strong at numerical reasoning and pattern detection
         "model": MODELS["qwen_72b"],
-        "base_rate_usd": 0.03,  # Competitive pricing
+        "base_rate_usd": 0.03,
         "rate_per_1k_tokens": 0.001,
-        "rating_avg": 4.9,
-        "rating_count": 47,
-        "jobs_completed": 52,
-        "jobs_failed": 1,
+        "rating_avg": 0.0,
+        "rating_count": 0,
+        "jobs_completed": 0,
+        "jobs_failed": 0,
         "status": AgentStatus.AVAILABLE.value,
-        "total_earned_usd": 156.50,
+        "total_earned_usd": 0.0,
     },
     {
         "agent_id": "agent_code_reviewer",
@@ -81,16 +81,15 @@ DEMO_AGENTS = [
         "owner_id": "0xOpenAgoraDemo0002",
         "wallet_address": "0xCodeReviewer00000000000000000000002",
         "provider": "fireworks",
-        # Uses DeepSeek Coder - specialized for code understanding
         "model": MODELS["deepseek_coder"],
         "base_rate_usd": 0.05,
         "rate_per_1k_tokens": 0.0015,
-        "rating_avg": 4.7,
-        "rating_count": 89,
-        "jobs_completed": 98,
-        "jobs_failed": 3,
+        "rating_avg": 0.0,
+        "rating_count": 0,
+        "jobs_completed": 0,
+        "jobs_failed": 0,
         "status": AgentStatus.AVAILABLE.value,
-        "total_earned_usd": 445.00,
+        "total_earned_usd": 0.0,
     },
     {
         "agent_id": "agent_data_analyst",
@@ -106,16 +105,15 @@ DEMO_AGENTS = [
         "owner_id": "0xOpenAgoraDemo0003",
         "wallet_address": "0xDataAnalyst0000000000000000000000003",
         "provider": "fireworks",
-        # Uses Qwen Coder - excellent at SQL generation and data analysis
         "model": MODELS["qwen_coder"],
         "base_rate_usd": 0.02,
         "rate_per_1k_tokens": 0.001,
-        "rating_avg": 4.8,
-        "rating_count": 156,
-        "jobs_completed": 189,
-        "jobs_failed": 4,
+        "rating_avg": 0.0,
+        "rating_count": 0,
+        "jobs_completed": 0,
+        "jobs_failed": 0,
         "status": AgentStatus.AVAILABLE.value,
-        "total_earned_usd": 890.25,
+        "total_earned_usd": 0.0,
     },
     {
         "agent_id": "agent_researcher",
@@ -131,16 +129,15 @@ DEMO_AGENTS = [
         "owner_id": "0xOpenAgoraDemo0004",
         "wallet_address": "0xResearchAgent000000000000000000000004",
         "provider": "fireworks",
-        # Uses Llama 70B - best for comprehensive reasoning and synthesis
         "model": MODELS["llama_70b"],
         "base_rate_usd": 0.04,
         "rate_per_1k_tokens": 0.001,
-        "rating_avg": 4.85,
-        "rating_count": 78,
-        "jobs_completed": 92,
-        "jobs_failed": 2,
+        "rating_avg": 0.0,
+        "rating_count": 0,
+        "jobs_completed": 0,
+        "jobs_failed": 0,
         "status": AgentStatus.AVAILABLE.value,
-        "total_earned_usd": 567.80,
+        "total_earned_usd": 0.0,
     },
     {
         "agent_id": "agent_doc_summarizer",
@@ -156,16 +153,15 @@ DEMO_AGENTS = [
         "owner_id": "0xOpenAgoraDemo0005",
         "wallet_address": "0xDocSummarizer0000000000000000000005",
         "provider": "fireworks",
-        # Uses Mixtral - fast and efficient for summarization
         "model": MODELS["mixtral"],
-        "base_rate_usd": 0.01,  # Very cheap - optimized for volume
+        "base_rate_usd": 0.01,
         "rate_per_1k_tokens": 0.0005,
-        "rating_avg": 4.92,
-        "rating_count": 234,
-        "jobs_completed": 267,
-        "jobs_failed": 2,
+        "rating_avg": 0.0,
+        "rating_count": 0,
+        "jobs_completed": 0,
+        "jobs_failed": 0,
         "status": AgentStatus.AVAILABLE.value,
-        "total_earned_usd": 1234.50,
+        "total_earned_usd": 0.0,
     },
     {
         "agent_id": "agent_sentiment_pro",
@@ -181,16 +177,15 @@ DEMO_AGENTS = [
         "owner_id": "0xOpenAgoraDemo0006",
         "wallet_address": "0xSentimentPro00000000000000000000006",
         "provider": "fireworks",
-        # Uses Llama 8B - sentiment is a simpler task, smaller model works well
         "model": MODELS["llama_8b"],
-        "base_rate_usd": 0.005,  # Very cheap - efficient small model
+        "base_rate_usd": 0.005,
         "rate_per_1k_tokens": 0.0002,
-        "rating_avg": 4.75,
-        "rating_count": 112,
-        "jobs_completed": 134,
-        "jobs_failed": 5,
+        "rating_avg": 0.0,
+        "rating_count": 0,
+        "jobs_completed": 0,
+        "jobs_failed": 0,
         "status": AgentStatus.AVAILABLE.value,
-        "total_earned_usd": 445.60,
+        "total_earned_usd": 0.0,
     },
 ]
 
