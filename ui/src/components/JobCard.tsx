@@ -12,12 +12,14 @@ import {
 import type { JobCardProps } from "../schemas/marketplace-components";
 
 const statusConfig: Record<string, { color: string; icon: typeof CheckCircle; label: string }> = {
+  open: { color: "bg-blue-500/20 text-blue-400", icon: AlertCircle, label: "Open" },
   posted: { color: "bg-blue-500/20 text-blue-400", icon: AlertCircle, label: "Open for Bids" },
   bidding: { color: "bg-cyan-500/20 text-cyan-400", icon: Activity, label: "Bidding" },
   negotiating: { color: "bg-purple-500/20 text-purple-400", icon: Activity, label: "Negotiating" },
   awaiting_approval: { color: "bg-orange-500/20 text-orange-400", icon: AlertCircle, label: "Awaiting Approval" },
   assigned: { color: "bg-purple-500/20 text-purple-400", icon: Clock, label: "Assigned" },
   in_progress: { color: "bg-amber-500/20 text-amber-400", icon: Activity, label: "In Progress" },
+  pending_review: { color: "bg-cyan-500/20 text-cyan-400", icon: AlertCircle, label: "Pending Review" },
   completed: { color: "bg-emerald-500/20 text-emerald-400", icon: CheckCircle, label: "Completed" },
   disputed: { color: "bg-red-500/20 text-red-400", icon: AlertCircle, label: "Disputed" },
   cancelled: { color: "bg-red-500/20 text-red-400", icon: XCircle, label: "Cancelled" },

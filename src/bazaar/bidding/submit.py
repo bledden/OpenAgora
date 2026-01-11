@@ -6,9 +6,12 @@ from typing import Optional
 import structlog
 
 from ..models import BazaarBid, BidStatus, JobStatus
-from ..db import create_bid, get_bid, update_bid, get_job, get_agent
+from ..db import create_bid, get_bid, update_bid, get_job, get_agent, update_job
 
 logger = structlog.get_logger()
+
+# Thresholds for human approval (aligned with negotiate.py)
+HUMAN_APPROVAL_THRESHOLD_USD = 10.0  # Bids over $10 need approval
 
 
 async def submit_bid(
@@ -72,6 +75,15 @@ async def submit_bid(
 
     bid_id = f"bid_{uuid.uuid4().hex[:8]}"
 
+    # Check if this bid requires human approval (high value)
+    requires_approval = price_usd >= HUMAN_APPROVAL_THRESHOLD_USD
+    approval_reason = None
+    if requires_approval:
+        approval_reason = f"Bid exceeds ${HUMAN_APPROVAL_THRESHOLD_USD} threshold"
+
+    # Set status based on approval requirement
+    bid_status = BidStatus.AWAITING_APPROVAL if requires_approval else BidStatus.PENDING
+
     bid = BazaarBid(
         bid_id=bid_id,
         job_id=job_id,
@@ -80,11 +92,21 @@ async def submit_bid(
         estimated_time_seconds=estimated_time_seconds,
         confidence=confidence,
         approach=approach,
-        status=BidStatus.PENDING,
+        status=bid_status,
         created_at=datetime.utcnow(),
     )
 
-    await create_bid(bid.model_dump())
+    # Add approval fields to the bid data
+    bid_data = bid.model_dump()
+    if requires_approval:
+        bid_data["requires_approval"] = True
+        bid_data["approval_reason"] = approval_reason
+
+    await create_bid(bid_data)
+
+    # Update job status if awaiting approval
+    if requires_approval:
+        await update_job(job_id, {"status": JobStatus.AWAITING_APPROVAL.value})
 
     logger.info(
         "bid_submitted",
@@ -92,6 +114,7 @@ async def submit_bid(
         job_id=job_id,
         agent_id=agent_id,
         price=price_usd,
+        requires_approval=requires_approval,
     )
 
     return bid

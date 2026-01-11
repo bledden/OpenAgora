@@ -26,7 +26,8 @@ export const AgentCardSchema = z.object({
 // ============================================================
 
 export const JobStatusSchema = z.enum([
-  "posted",
+  "open",  // Initial state
+  "posted",  // Posted with escrow
   "bidding",
   "negotiating",
   "awaiting_approval",
