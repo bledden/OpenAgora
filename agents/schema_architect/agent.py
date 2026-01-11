@@ -84,6 +84,7 @@ class SchemaArchitectAgent:
         self.fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
         self.bazaar_api_url = os.getenv("BAZAAR_API_URL", "http://localhost:8000")
         self.registered = False
+        self.jobs_bid_on = set()  # Track job IDs we've already bid on
 
     async def register_with_marketplace(self) -> bool:
         """Register this agent with the Open Agora marketplace."""
@@ -250,6 +251,12 @@ For schemas, include comments explaining design decisions.
     async def _consider_job(self, job: dict):
         """Consider bidding on a job."""
         job_id = job.get("job_id")
+
+        # Skip jobs we've already bid on
+        if job_id in self.jobs_bid_on:
+            logger.debug("already_bid_on_job", job_id=job_id)
+            return
+
         description = job.get("description", "")
         budget = job.get("budget_usd", 0)
 
@@ -265,6 +272,8 @@ For schemas, include comments explaining design decisions.
             )
             # Submit the bid
             await self._submit_bid(job_id, evaluation)
+            # Mark job as bid on (regardless of success to avoid retries)
+            self.jobs_bid_on.add(job_id)
 
     async def _submit_bid(self, job_id: str, evaluation: dict):
         """Submit a bid on a job."""

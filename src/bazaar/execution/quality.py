@@ -1,8 +1,12 @@
-"""Quality evaluation using Galileo-style scoring.
+"""Quality evaluation using Galileo AI and fallback LLM scoring.
 
 This module provides AI-SUGGESTED quality scores and recommendations.
 IMPORTANT: Humans make the final decision on accepting/rejecting work
 and determining the final rating. AI provides suggestions only.
+
+Uses Galileo AI (promptquality SDK) when available for enterprise-grade
+evaluation metrics (correctness, completeness, toxicity, PII detection).
+Falls back to LLM-based evaluation if Galileo is not configured.
 """
 
 import structlog
@@ -10,6 +14,7 @@ from typing import Optional
 
 from ..llm import call_fireworks_json
 from ..config import get_settings
+from .galileo_eval import evaluate_with_galileo, is_galileo_available
 
 logger = structlog.get_logger()
 
@@ -45,21 +50,157 @@ async def get_quality_suggestion(
     task_type: str,
     task_description: str,
     result: dict,
+    expected_output: Optional[str] = None,
 ) -> dict:
     """Get AI quality suggestion for a task result.
 
     This provides SUGGESTIONS for human review. The human makes the final decision.
 
+    Uses Galileo AI when available for enterprise-grade metrics (correctness,
+    completeness, toxicity, PII). Falls back to LLM-based evaluation otherwise.
+
     Args:
         task_type: Type of task (analysis, summarization, etc.)
         task_description: Original task description
         result: Agent's output to evaluate
+        expected_output: Optional expected output for ground truth comparison
 
     Returns:
         Suggestion dict with scores, recommendation, and detailed feedback
     """
     settings = get_settings()
 
+    # Try Galileo first if available
+    if is_galileo_available():
+        galileo_result = await evaluate_with_galileo(
+            task_description=task_description,
+            result=result,
+            task_type=task_type,
+            expected_output=expected_output,
+        )
+
+        if galileo_result:
+            return _build_suggestion_from_galileo(galileo_result, task_type)
+
+        logger.warning("galileo_evaluation_failed_using_fallback")
+
+    # Fallback to LLM-based evaluation
+    return await _get_llm_quality_suggestion(task_type, task_description, result)
+
+
+def _build_suggestion_from_galileo(galileo_result: dict, task_type: str) -> dict:
+    """Build suggestion dict from Galileo evaluation results."""
+    scores = galileo_result.get("scores", {})
+
+    # Map Galileo scores to our format
+    suggestion = {
+        "scores": {
+            "relevance": _safe_score(scores.get("instruction_adherence", 0.5)),
+            "accuracy": _safe_score(scores.get("correctness", 0.5)),
+            "completeness": _safe_score(scores.get("completeness", 0.5)),
+            "clarity": _safe_score(0.7),  # Galileo doesn't have clarity metric
+            "actionability": _safe_score(0.7),  # Galileo doesn't have this metric
+        },
+        "suggested_overall": _safe_score(scores.get("overall", 0.5)),
+        "recommendation": _get_recommendation_from_score(scores.get("overall", 0.5)),
+        "feedback": _build_galileo_feedback(scores),
+        "strengths": _build_galileo_strengths(scores),
+        "improvements": _build_galileo_improvements(scores),
+        "red_flags": _build_galileo_red_flags(scores),
+        "is_ai_suggestion": True,
+        "awaiting_human_review": True,
+        "evaluation_provider": "galileo",
+        "galileo_metrics": scores,
+    }
+
+    logger.info(
+        "quality_suggestion_generated",
+        task_type=task_type,
+        suggested_overall=suggestion["suggested_overall"],
+        recommendation=suggestion["recommendation"],
+        provider="galileo",
+    )
+
+    return suggestion
+
+
+def _get_recommendation_from_score(score: float) -> str:
+    """Convert numeric score to recommendation."""
+    if score >= 0.7:
+        return "accept"
+    elif score >= 0.4:
+        return "partial"
+    else:
+        return "reject"
+
+
+def _build_galileo_feedback(scores: dict) -> str:
+    """Build feedback text from Galileo scores."""
+    overall = scores.get("overall", 0.5)
+    correctness = scores.get("correctness", 0.5)
+    completeness = scores.get("completeness", 0.5)
+
+    feedback_parts = [
+        f"Galileo evaluation complete. Overall quality: {overall:.0%}.",
+        f"Correctness: {correctness:.0%}, Completeness: {completeness:.0%}.",
+    ]
+
+    if scores.get("toxicity", 0) > 0.3:
+        feedback_parts.append("Warning: Some toxic content detected.")
+    if scores.get("pii_detected"):
+        feedback_parts.append("Warning: PII (personally identifiable information) detected.")
+    if scores.get("prompt_injection_detected"):
+        feedback_parts.append("Critical: Potential prompt injection detected!")
+
+    return " ".join(feedback_parts)
+
+
+def _build_galileo_strengths(scores: dict) -> list:
+    """Build strengths list from Galileo scores."""
+    strengths = []
+    if scores.get("correctness", 0) >= 0.7:
+        strengths.append("High factual accuracy")
+    if scores.get("completeness", 0) >= 0.7:
+        strengths.append("Comprehensive response")
+    if scores.get("instruction_adherence", 0) >= 0.7:
+        strengths.append("Follows instructions well")
+    if scores.get("toxicity", 1) < 0.1:
+        strengths.append("Clean, professional language")
+    return strengths
+
+
+def _build_galileo_improvements(scores: dict) -> list:
+    """Build improvements list from Galileo scores."""
+    improvements = []
+    if scores.get("correctness", 1) < 0.6:
+        improvements.append("Improve factual accuracy")
+    if scores.get("completeness", 1) < 0.6:
+        improvements.append("Provide more complete response")
+    if scores.get("instruction_adherence", 1) < 0.6:
+        improvements.append("Better follow the given instructions")
+    return improvements
+
+
+def _build_galileo_red_flags(scores: dict) -> list:
+    """Build red flags list from Galileo scores."""
+    red_flags = []
+    if scores.get("toxicity", 0) > 0.5:
+        red_flags.append("High toxicity detected")
+    if scores.get("pii_detected"):
+        red_flags.append("Contains personally identifiable information (PII)")
+    if scores.get("prompt_injection_detected"):
+        red_flags.append("Potential prompt injection attack detected")
+    if scores.get("overall", 1) < 0.3:
+        red_flags.append("Very low overall quality score")
+    return red_flags
+
+
+async def _get_llm_quality_suggestion(
+    task_type: str,
+    task_description: str,
+    result: dict,
+) -> dict:
+    """Fallback LLM-based quality evaluation when Galileo is unavailable."""
     try:
         # Build evaluation prompt
         eval_prompt = f"""Evaluate this AI agent output for quality.
@@ -99,8 +240,9 @@ Provide quality scores and detailed recommendations."""
             "strengths": evaluation.get("strengths", []),
             "improvements": evaluation.get("improvements", []),
             "red_flags": evaluation.get("red_flags", []),
-            "is_ai_suggestion": True,  # Explicit flag that this is AI-generated
+            "is_ai_suggestion": True,
             "awaiting_human_review": True,
+            "evaluation_provider": "llm_fallback",
         }
 
         logger.info(
@@ -108,6 +250,7 @@ Provide quality scores and detailed recommendations."""
             task_type=task_type,
             suggested_overall=suggestion["suggested_overall"],
             recommendation=suggestion["recommendation"],
+            provider="llm_fallback",
         )
 
         return suggestion
@@ -131,6 +274,7 @@ Provide quality scores and detailed recommendations."""
             "red_flags": ["AI evaluation failed - manual review required"],
             "is_ai_suggestion": True,
             "awaiting_human_review": True,
+            "evaluation_provider": "error_fallback",
             "error": str(e),
         }
 

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # Galileo (quality evaluation)
     galileo_api_key: str = ""
     galileo_project: str = "agentbazaar"
+    galileo_console_url: str = "https://app.galileo.ai"
 
     # Thesys (generative UI)
     thesys_api_key: str = ""

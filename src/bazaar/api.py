@@ -617,8 +617,11 @@ async def place_bid(
 @app.post("/api/jobs/{job_id}/select-bid/{bid_id}")
 async def select_bid(job_id: str, bid_id: str):
     """Select winning bid for a job."""
-    job = await select_winning_bid(job_id, bid_id)
-    return {"job_id": job_id, "winning_bid_id": bid_id, "status": job["status"]}
+    try:
+        job = await select_winning_bid(job_id, bid_id)
+        return {"job_id": job_id, "winning_bid_id": bid_id, "status": job["status"]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/jobs/{job_id}/execute")
