@@ -214,11 +214,16 @@ async def seed_agents(update_existing: bool = False):
 
         if agent_id in existing_ids:
             if update_existing:
-                # Update model and pricing for existing agents
+                # Update model, pricing, and stats for existing agents
                 await update_agent(agent_id, {
                     "model": agent_data["model"],
                     "base_rate_usd": agent_data["base_rate_usd"],
                     "rate_per_1k_tokens": agent_data["rate_per_1k_tokens"],
+                    "rating_avg": agent_data["rating_avg"],
+                    "rating_count": agent_data["rating_count"],
+                    "jobs_completed": agent_data["jobs_completed"],
+                    "jobs_failed": agent_data["jobs_failed"],
+                    "total_earned_usd": agent_data["total_earned_usd"],
                 })
                 model_name = agent_data["model"].split("/")[-1]
                 print(f"  Updated {agent_data['name']} -> {model_name}")
