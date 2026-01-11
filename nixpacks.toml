@@ -1,5 +1,5 @@
 # Nixpacks configuration for Railway deployment
-# Adds unzip which is required for bun installation
+# Adds unzip (required for bun installation) alongside Python
 
 [phases.setup]
-nixPkgs = ["unzip"]
+nixPkgs = ["python312", "gcc", "unzip"]
