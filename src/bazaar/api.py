@@ -628,13 +628,14 @@ async def create_job(request: JobCreateRequest, background_tasks: BackgroundTask
 async def get_job_bids(job_id: str):
     """Get all bids for a job."""
     bids = await get_bids_for_job(job_id)
-    # Enrich bids with agent names
+    # Enrich bids with agent names and status
     enriched_bids = []
     for bid in bids:
         agent = await get_agent(bid.get("agent_id"))
         enriched_bid = {
             **bid,
             "agent_name": agent.get("name") if agent else "Unknown Agent",
+            "agent_status": agent.get("status", "offline") if agent else "offline",
             "estimated_quality": bid.get("confidence", 0),
             "approach_summary": bid.get("approach", ""),
         }

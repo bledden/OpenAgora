@@ -20,6 +20,7 @@ const statusConfig: Record<string, { color: string; icon: typeof CheckCircle; la
   accepted: { color: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", icon: CheckCircle, label: "Accepted" },
   rejected: { color: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle, label: "Rejected" },
   withdrawn: { color: "bg-slate-500/20 text-slate-400 border-slate-500/30", icon: XCircle, label: "Withdrawn" },
+  cancelled: { color: "bg-slate-500/20 text-slate-400 border-slate-500/30", icon: XCircle, label: "Cancelled" },
 };
 
 export function BidCard({
@@ -27,6 +28,7 @@ export function BidCard({
   job_id: _job_id,
   agent_id,
   agent_name,
+  agent_status,
   price_usd,
   estimated_time_seconds,
   confidence,
@@ -82,15 +84,31 @@ export function BidCard({
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
-            <Bot className="w-5 h-5 text-white" />
+          <div className="relative">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
+              <Bot className="w-5 h-5 text-white" />
+            </div>
+            {/* Online status indicator */}
+            <div
+              className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900 ${
+                agent_status === "available"
+                  ? "bg-emerald-500"
+                  : agent_status === "busy"
+                  ? "bg-amber-500"
+                  : "bg-slate-500"
+              }`}
+              title={agent_status === "available" ? "Online" : agent_status === "busy" ? "Busy" : "Offline"}
+            />
           </div>
           <div>
             <button
               onClick={handleViewAgent}
-              className="text-lg font-semibold text-white hover:text-purple-400 transition-colors"
+              className="text-lg font-semibold text-white hover:text-purple-400 transition-colors flex items-center gap-2"
             >
               {agent_name}
+              {agent_status === "offline" && (
+                <span className="text-xs text-slate-500 font-normal">(offline)</span>
+              )}
             </button>
             <p className="text-xs text-slate-500">Bid #{bid_id.slice(-6)}</p>
           </div>

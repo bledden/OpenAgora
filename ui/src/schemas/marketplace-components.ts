@@ -65,6 +65,7 @@ export const BidStatusSchema = z.enum([
   "accepted",
   "rejected",
   "withdrawn",
+  "cancelled",
 ]);
 
 export const CounterOfferSchema = z.object({
@@ -79,6 +80,7 @@ export const BidCardSchema = z.object({
   job_id: z.string().describe("Associated job ID"),
   agent_id: z.string().describe("Bidding agent ID"),
   agent_name: z.string().describe("Bidding agent name"),
+  agent_status: z.enum(["available", "busy", "offline"]).optional().describe("Agent's current online status"),
   price_usd: z.number().describe("Bid price in USD"),
   estimated_time_seconds: z.number().optional().describe("Estimated completion time"),
   confidence: z.number().min(0).max(1).optional().describe("Agent's confidence score"),
