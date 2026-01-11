@@ -1,7 +1,4 @@
-# Minimal dependencies for Vercel serverless deployment
-# Heavy dependencies (x402, eth-account, mcp, cdp-sdk) are NOT needed for the API
-# They are only used by the local MCP server and CLI tools
-
+# Dependencies for Railway deployment
 motor>=3.3.2
 pymongo>=4.6.1
 pydantic>=2.5.3
@@ -12,3 +9,6 @@ structlog>=24.1.0
 fastapi>=0.110.0
 mangum>=0.17.0
 uvicorn>=0.27.0
+openai>=1.10.0
+thesys-genui-sdk>=0.1.0
+voyageai>=0.2.0
