@@ -545,6 +545,153 @@ function PostJobModal({
 }
 
 // ============================================================
+// Job Detail Modal
+// ============================================================
+
+function JobDetailModal({
+  job,
+  onClose,
+  onAcceptBid,
+  onRejectBid,
+}: {
+  job: Job | null;
+  onClose: () => void;
+  onAcceptBid: (jobId: string) => void;
+  onRejectBid: (jobId: string) => void;
+}) {
+  const [bids, setBids] = useState<Array<{
+    bid_id: string;
+    agent_id: string;
+    agent_name?: string;
+    price_usd: number;
+    estimated_quality: number;
+    approach_summary?: string;
+    status: string;
+  }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (job) {
+      setLoading(true);
+      fetch(`/api/jobs/${job.job_id}/bids`)
+        .then(res => res.json())
+        .then(data => {
+          setBids(data.bids || []);
+          setLoading(false);
+        })
+        .catch(() => setLoading(false));
+    }
+  }, [job]);
+
+  if (!job) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 w-full max-w-2xl max-h-[80vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-800">
+          <div>
+            <h2 className="text-xl font-semibold text-white">{job.title}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <StatusBadge status={job.status} />
+              <span className="text-sm text-slate-500">•</span>
+              <span className="text-sm text-emerald-400">${job.budget_usd.toFixed(2)}</span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-5 space-y-5 overflow-y-auto max-h-[60vh]">
+          {/* Description */}
+          <div>
+            <h3 className="text-sm font-medium text-slate-400 mb-2">Description</h3>
+            <p className="text-slate-300">{job.description}</p>
+          </div>
+
+          {/* Required Capabilities */}
+          <div>
+            <h3 className="text-sm font-medium text-slate-400 mb-2">Required Capabilities</h3>
+            <div className="flex flex-wrap gap-2">
+              {job.required_capabilities.map((cap) => (
+                <span key={cap} className="px-2 py-1 text-xs bg-indigo-500/20 text-indigo-300 rounded">
+                  {cap}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Bids Section */}
+          <div>
+            <h3 className="text-sm font-medium text-slate-400 mb-3">
+              Bids {bids.length > 0 && `(${bids.length})`}
+            </h3>
+            {loading ? (
+              <p className="text-slate-500 text-sm">Loading bids...</p>
+            ) : bids.length === 0 ? (
+              <p className="text-slate-500 text-sm">No bids yet</p>
+            ) : (
+              <div className="space-y-3">
+                {bids.map((bid) => (
+                  <div key={bid.bid_id} className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium text-white">{bid.agent_name || bid.agent_id}</span>
+                      <span className="text-emerald-400 font-semibold">${bid.price_usd.toFixed(2)}</span>
+                    </div>
+                    {bid.approach_summary && (
+                      <p className="text-sm text-slate-400 mb-3">{bid.approach_summary}</p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500">
+                        Quality estimate: {(bid.estimated_quality * 100).toFixed(0)}%
+                      </span>
+                      {bid.status === "pending" && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => onAcceptBid(bid.bid_id)}
+                            className="px-3 py-1 text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded transition-colors"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => onRejectBid(bid.bid_id)}
+                            className="px-3 py-1 text-xs bg-red-600/20 hover:bg-red-600/30 text-red-400 rounded transition-colors"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                      {bid.status !== "pending" && (
+                        <span className="text-xs text-slate-500 capitalize">{bid.status}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-5 border-t border-slate-800">
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium rounded-lg transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Home View
 // ============================================================
 
@@ -1016,6 +1163,7 @@ export default function App() {
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -1074,7 +1222,43 @@ export default function App() {
   };
 
   const handleViewJob = (job: Job) => {
-    console.log("View job:", job.job_id);
+    setSelectedJob(job);
+  };
+
+  const handleAcceptBid = async (bidId: string) => {
+    try {
+      const response = await fetch(`/api/bids/${bidId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (response.ok) {
+        setSelectedJob(null);
+        fetchData();
+      } else {
+        const error = await response.json();
+        alert(`Failed to accept bid: ${error.detail || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Error accepting bid:", error);
+    }
+  };
+
+  const handleRejectBid = async (bidId: string) => {
+    try {
+      const response = await fetch(`/api/bids/${bidId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (response.ok) {
+        setSelectedJob(null);
+        fetchData();
+      } else {
+        const error = await response.json();
+        alert(`Failed to reject bid: ${error.detail || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error("Error rejecting bid:", error);
+    }
   };
 
   const handleReviewJob = (review: PendingReview) => {
@@ -1218,6 +1402,13 @@ export default function App() {
         isOpen={isPostModalOpen}
         onClose={() => setIsPostModalOpen(false)}
         onSubmit={handlePostJob}
+      />
+
+      <JobDetailModal
+        job={selectedJob}
+        onClose={() => setSelectedJob(null)}
+        onAcceptBid={handleAcceptBid}
+        onRejectBid={handleRejectBid}
       />
     </div>
   );
