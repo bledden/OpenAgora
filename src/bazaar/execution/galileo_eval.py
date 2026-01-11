@@ -125,6 +125,22 @@ async def evaluate_with_galileo(
         # Extract scores from Galileo results
         scores = _extract_galileo_scores(results)
 
+        # Check if we got actual metrics or just defaults (scorer failure)
+        # If all main scores are exactly 0.5 (defaults), scorers likely failed
+        scores_are_defaults = (
+            scores.get("correctness") == 0.5
+            and scores.get("completeness") == 0.5
+            and scores.get("instruction_adherence") == 0.5
+        )
+
+        if scores_are_defaults:
+            logger.warning(
+                "galileo_scorers_returned_defaults",
+                task_type=task_type,
+                message="Galileo scorers may have failed - returning None to trigger fallback",
+            )
+            return None
+
         logger.info(
             "galileo_evaluation_complete",
             task_type=task_type,
