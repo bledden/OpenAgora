@@ -32,7 +32,7 @@ logger = structlog.get_logger()
 
 # Agent configuration
 AGENT_CONFIG = {
-    "agent_id": "agent_schema_architect",
+    "agent_id": "agent_24a17a8f",  # Server-assigned ID from previous registration
     "name": "SchemaArchitect",
     "description": """Expert in API and data schema design. Specializes in REST API design,
 OpenAPI/Swagger specs, GraphQL schemas, database modeling (SQL & NoSQL), and schema validation.
@@ -98,12 +98,16 @@ class SchemaArchitectAgent:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.bazaar_api_url}/agents/register",
+                    f"{self.bazaar_api_url}/api/agents/register",
                     json=registration_data,
                     timeout=30.0,
                 )
 
                 if response.status_code in [200, 201]:
+                    data = response.json()
+                    # Capture the server-assigned agent_id
+                    if "agent_id" in data:
+                        self.config["agent_id"] = data["agent_id"]
                     logger.info("agent_registered", agent_id=self.config["agent_id"])
                     self.registered = True
                     return True
@@ -225,15 +229,16 @@ For schemas, include comments explaining design decisions.
         while True:
             try:
                 async with httpx.AsyncClient() as client:
-                    # Get open jobs
+                    # Get posted jobs (jobs awaiting bids)
                     response = await client.get(
-                        f"{self.bazaar_api_url}/jobs",
-                        params={"status": "open", "limit": 10},
+                        f"{self.bazaar_api_url}/api/jobs",
+                        params={"status": "posted", "limit": 10},
                         timeout=30.0,
                     )
 
                     if response.status_code == 200:
-                        jobs = response.json()
+                        data = response.json()
+                        jobs = data.get("jobs", []) if isinstance(data, dict) else data
                         for job in jobs:
                             await self._consider_job(job)
 
@@ -253,12 +258,37 @@ For schemas, include comments explaining design decisions.
 
         if evaluation.get("can_complete"):
             logger.info(
-                "considering_bid",
+                "submitting_bid",
                 job_id=job_id,
                 confidence=evaluation.get("confidence"),
                 bid=evaluation.get("bid_amount_usd"),
             )
-            # In a real implementation, you'd submit the bid here
+            # Submit the bid
+            await self._submit_bid(job_id, evaluation)
+
+    async def _submit_bid(self, job_id: str, evaluation: dict):
+        """Submit a bid on a job."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.bazaar_api_url}/api/jobs/{job_id}/bids",
+                    params={
+                        "agent_id": self.config["agent_id"],
+                        "price_usd": evaluation.get("bid_amount_usd"),
+                        "estimated_quality": evaluation.get("confidence"),
+                        "estimated_time_seconds": evaluation.get("estimated_time_minutes", 5) * 60,
+                        "approach_summary": evaluation.get("reasoning", "API/Schema design expertise"),
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201):
+                    logger.info("bid_submitted", job_id=job_id, response=response.json())
+                else:
+                    logger.warning("bid_failed", job_id=job_id, status=response.status_code, body=response.text)
+
+        except Exception as e:
+            logger.error("bid_submission_error", job_id=job_id, error=str(e))
 
 
 async def run_interactive():

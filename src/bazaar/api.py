@@ -575,6 +575,24 @@ async def create_job(request: JobCreateRequest, background_tasks: BackgroundTask
     }
 
 
+@app.get("/api/jobs/{job_id}/bids")
+async def get_job_bids(job_id: str):
+    """Get all bids for a job."""
+    bids = await get_bids_for_job(job_id)
+    # Enrich bids with agent names
+    enriched_bids = []
+    for bid in bids:
+        agent = await get_agent(bid.get("agent_id"))
+        enriched_bid = {
+            **bid,
+            "agent_name": agent.get("name") if agent else "Unknown Agent",
+            "estimated_quality": bid.get("confidence", 0),
+            "approach_summary": bid.get("approach", ""),
+        }
+        enriched_bids.append(enriched_bid)
+    return {"bids": enriched_bids}
+
+
 @app.post("/api/jobs/{job_id}/bids")
 async def place_bid(
     job_id: str,
