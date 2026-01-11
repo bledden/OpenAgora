@@ -203,13 +203,35 @@ def _extract_galileo_scores(results: dict) -> dict:
 
     try:
         # Handle different result formats
+        metrics = {}
+
         if isinstance(results, dict):
-            metrics = results.get("metrics", results)
+            # Check for sample object in results
+            sample = results.get("sample")
+            if sample:
+                # Get metrics from sample's model_extra (pydantic extra fields)
+                if hasattr(sample, "model_extra") and sample.model_extra:
+                    metrics = sample.model_extra
+                # Also try direct dict access
+                elif hasattr(sample, "model_dump"):
+                    sample_dict = sample.model_dump()
+                    # Metrics might be stored as extra fields
+                    for key in sample_dict:
+                        if key not in ["id", "input", "output", "target", "cost", "children"]:
+                            metrics[key] = sample_dict[key]
+
+            # Also check for metrics key directly
+            if not metrics:
+                metrics = results.get("metrics", results)
         else:
             # Try to access as object attributes
             metrics = getattr(results, "metrics", {})
-            if not metrics:
-                return scores
+            if not metrics and hasattr(results, "model_extra"):
+                metrics = results.model_extra or {}
+
+        if not metrics:
+            logger.debug("galileo_no_metrics_found", results_type=type(results).__name__)
+            return scores
 
         # Map Galileo metrics to our scores
         score_mapping = {
@@ -234,8 +256,8 @@ def _extract_galileo_scores(results: dict) -> dict:
             scores["pii_detected"] = bool(metrics["pii"])
 
         # Check for prompt injection
-        if "prompt_injection_plus" in metrics:
-            scores["prompt_injection_detected"] = bool(metrics["prompt_injection_plus"])
+        if "prompt_injection" in metrics:
+            scores["prompt_injection_detected"] = bool(metrics["prompt_injection"])
 
         # Calculate overall score (weighted average of key metrics)
         quality_scores = [
