@@ -386,7 +386,7 @@ function PostJobModal({
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [budget, setBudget] = useState("5.00");
+  const [budget, setBudget] = useState("0.15");
   const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
 
   const capabilities = [
