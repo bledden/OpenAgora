@@ -692,6 +692,110 @@ function JobDetailModal({
 }
 
 // ============================================================
+// Review Modal
+// ============================================================
+
+function ReviewModal({
+  review,
+  onClose,
+  onSubmit,
+}: {
+  review: PendingReview | null;
+  onClose: () => void;
+  onSubmit: (jobId: string, decision: "accept" | "partial" | "reject") => void;
+}) {
+  if (!review) return null;
+
+  const aiSuggestion = review.ai_quality_suggestion;
+  const resultText = typeof review.result === "string"
+    ? review.result
+    : JSON.stringify(review.result, null, 2);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-800">
+          <div>
+            <h2 className="text-xl font-semibold text-white">{review.title}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <Bot className="w-4 h-4 text-purple-400" />
+              <span className="text-sm text-slate-400">Completed by {review.agent_name}</span>
+              <span className="text-sm text-slate-500">•</span>
+              <span className="text-sm text-emerald-400">${review.budget_usd.toFixed(2)}</span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* AI Suggestion */}
+          {aiSuggestion && (
+            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+              <div className="flex items-center gap-2 mb-2">
+                <Star className="w-4 h-4 text-amber-400" />
+                <span className="font-medium text-white">AI Quality Assessment</span>
+                <span className={`ml-auto px-2 py-0.5 rounded text-xs font-medium ${
+                  aiSuggestion.recommendation === "accept" ? "bg-emerald-500/20 text-emerald-400" :
+                  aiSuggestion.recommendation === "partial" ? "bg-amber-500/20 text-amber-400" :
+                  "bg-red-500/20 text-red-400"
+                }`}>
+                  {aiSuggestion.recommendation.toUpperCase()}
+                </span>
+              </div>
+              <p className="text-sm text-slate-300">{aiSuggestion.feedback}</p>
+              <div className="mt-2 text-xs text-slate-500">
+                Score: {(aiSuggestion.suggested_overall * 100).toFixed(0)}%
+              </div>
+            </div>
+          )}
+
+          {/* Result */}
+          <div>
+            <h3 className="text-sm font-medium text-slate-400 mb-2">Agent Output</h3>
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 max-h-64 overflow-y-auto">
+              <pre className="text-sm text-slate-300 whitespace-pre-wrap font-mono">
+                {resultText || "No result available"}
+              </pre>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="p-5 border-t border-slate-800">
+          <div className="flex gap-3">
+            <button
+              onClick={() => onSubmit(review.job_id, "reject")}
+              className="flex-1 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-medium rounded-lg transition-colors"
+            >
+              Reject
+            </button>
+            <button
+              onClick={() => onSubmit(review.job_id, "partial")}
+              className="flex-1 py-2.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 text-sm font-medium rounded-lg transition-colors"
+            >
+              Partial Accept
+            </button>
+            <button
+              onClick={() => onSubmit(review.job_id, "accept")}
+              className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Accept & Pay
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Home View
 // ============================================================
 
@@ -1164,6 +1268,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedReview, setSelectedReview] = useState<PendingReview | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -1262,21 +1367,7 @@ export default function App() {
   };
 
   const handleReviewJob = (review: PendingReview) => {
-    // For now, show an alert with review options
-    // In a full implementation, this would open a review modal or navigate to review detail page
-    const aiSuggestion = review.ai_quality_suggestion;
-    const message = aiSuggestion
-      ? `Review "${review.title}"\n\nAI Suggestion: ${(aiSuggestion.suggested_overall * 100).toFixed(0)}% - ${aiSuggestion.recommendation}\n\n${aiSuggestion.feedback}`
-      : `Review "${review.title}"`;
-
-    const decision = window.prompt(
-      `${message}\n\nEnter decision (accept/partial/reject):`,
-      aiSuggestion?.recommendation || "accept"
-    );
-
-    if (decision && ["accept", "partial", "reject"].includes(decision.toLowerCase())) {
-      submitReview(review.job_id, decision.toLowerCase() as "accept" | "partial" | "reject");
-    }
+    setSelectedReview(review);
   };
 
   const submitReview = async (jobId: string, decision: "accept" | "partial" | "reject") => {
@@ -1293,6 +1384,7 @@ export default function App() {
       });
 
       if (response.ok) {
+        setSelectedReview(null);
         fetchData(); // Refresh data after review
       } else {
         const error = await response.json();
@@ -1409,6 +1501,12 @@ export default function App() {
         onClose={() => setSelectedJob(null)}
         onAcceptBid={handleAcceptBid}
         onRejectBid={handleRejectBid}
+      />
+
+      <ReviewModal
+        review={selectedReview}
+        onClose={() => setSelectedReview(null)}
+        onSubmit={submitReview}
       />
     </div>
   );
