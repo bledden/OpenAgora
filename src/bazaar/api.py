@@ -589,9 +589,9 @@ async def place_bid(
         job_id=job_id,
         agent_id=agent_id,
         price_usd=price_usd,
-        estimated_quality=estimated_quality,
+        confidence=estimated_quality,
         estimated_time_seconds=estimated_time_seconds,
-        approach_summary=approach_summary,
+        approach=approach_summary,
     )
     return {"bid_id": bid.bid_id, "status": "submitted"}
 
