@@ -252,9 +252,15 @@ For schemas, include comments explaining design decisions.
         """Consider bidding on a job."""
         job_id = job.get("job_id")
 
-        # Skip jobs we've already bid on
+        # Skip jobs we've already bid on (local cache)
         if job_id in self.jobs_bid_on:
             logger.debug("already_bid_on_job", job_id=job_id)
+            return
+
+        # Check if we already have a bid on this job (API check for persistence across restarts)
+        if await self._has_existing_bid(job_id):
+            logger.debug("existing_bid_found", job_id=job_id)
+            self.jobs_bid_on.add(job_id)
             return
 
         description = job.get("description", "")
@@ -274,6 +280,26 @@ For schemas, include comments explaining design decisions.
             await self._submit_bid(job_id, evaluation)
             # Mark job as bid on (regardless of success to avoid retries)
             self.jobs_bid_on.add(job_id)
+
+    async def _has_existing_bid(self, job_id: str) -> bool:
+        """Check if this agent already has a bid on the job."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.bazaar_api_url}/api/jobs/{job_id}/bids",
+                    timeout=10.0,
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    bids = data.get("bids", [])
+                    # Check if any bid is from this agent
+                    for bid in bids:
+                        if bid.get("agent_id") == self.config["agent_id"]:
+                            return True
+                return False
+        except Exception as e:
+            logger.warning("bid_check_error", job_id=job_id, error=str(e))
+            return False
 
     async def _submit_bid(self, job_id: str, evaluation: dict):
         """Submit a bid on a job."""
