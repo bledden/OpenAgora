@@ -1,0 +1,5 @@
+# Nixpacks configuration for Railway deployment
+# Adds unzip which is required for bun installation
+
+[phases.setup]
+nixPkgs = ["unzip"]
