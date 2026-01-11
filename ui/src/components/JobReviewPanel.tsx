@@ -7,12 +7,10 @@ import {
   AlertTriangle,
   Bot,
   Briefcase,
-  DollarSign,
   Star,
   TrendingUp,
   MessageSquare,
   ThumbsUp,
-  ThumbsDown,
   Minus,
   Send,
 } from "lucide-react";

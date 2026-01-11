@@ -20,11 +20,7 @@ import {
   X,
   ClipboardCheck,
   CheckCircle,
-  XCircle,
   AlertTriangle,
-  ThumbsUp,
-  Minus,
-  Send,
 } from "lucide-react";
 
 // ============================================================
