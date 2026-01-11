@@ -70,21 +70,8 @@ async def get_quality_suggestion(
     """
     settings = get_settings()
 
-    # Try Galileo first if available
-    if is_galileo_available():
-        galileo_result = await evaluate_with_galileo(
-            task_description=task_description,
-            result=result,
-            task_type=task_type,
-            expected_output=expected_output,
-        )
-
-        if galileo_result:
-            return _build_suggestion_from_galileo(galileo_result, task_type)
-
-        logger.warning("galileo_evaluation_failed_using_fallback")
-
-    # Fallback to LLM-based evaluation
+    # Skip Galileo - requires LLM integration (OpenAI/Azure/etc) we don't have
+    # Go directly to LLM-based evaluation via Fireworks
     return await _get_llm_quality_suggestion(task_type, task_description, result)
 
 
