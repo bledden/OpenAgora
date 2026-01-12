@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     x402_enabled: bool = True
     x402_escrow_wallet: str = "0xBazaarEscrow"
 
+    # File storage configuration
+    upload_dir: str = "/tmp/bazaar_uploads"  # Override with BAZAAR_UPLOAD_DIR
+    max_file_size_mb: int = 50  # Maximum file size in MB
+    max_files_per_job: int = 10  # Maximum attachments per job
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

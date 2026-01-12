@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 import structlog
 import httpx
@@ -65,6 +65,24 @@ from .auth import (
     cleanup_expired,
 )
 from .webhooks import notify_agents_of_job, notify_bid_selected
+from .files import (
+    save_upload,
+    get_file_path,
+    delete_file,
+    is_allowed_file,
+    get_file_category,
+    format_file_size,
+    JobAttachment,
+    ExportFormat,
+    export_result_as_json,
+    export_result_as_csv,
+    export_result_as_markdown,
+    export_result_as_text,
+    MAX_FILE_SIZE_MB,
+    MAX_FILES_PER_JOB,
+    ALLOWED_EXTENSIONS,
+    FileCategory,
+)
 
 load_dotenv()
 logger = structlog.get_logger()
@@ -1051,6 +1069,226 @@ async def refund_job_endpoint(job_id: str):
         "refund_txn_id": refund_txn.txn_id,
         "amount": refund_txn.amount_usd,
     }
+
+
+# ============================================================
+# File Upload/Download Endpoints
+# ============================================================
+
+@app.get("/api/files/allowed-types")
+async def get_allowed_file_types():
+    """Get list of allowed file types for upload."""
+    return {
+        "max_file_size_mb": MAX_FILE_SIZE_MB,
+        "max_files_per_job": MAX_FILES_PER_JOB,
+        "allowed_extensions": {
+            category.value: sorted(list(extensions))
+            for category, extensions in ALLOWED_EXTENSIONS.items()
+        },
+    }
+
+
+@app.post("/api/jobs/{job_id}/files")
+async def upload_file_to_job(
+    job_id: str,
+    file: UploadFile = File(...),
+    uploaded_by: str = Form(default="anonymous"),
+):
+    """Upload a file attachment to a job.
+
+    Supports code files, images, documents, and data files.
+    Maximum file size: 50MB (configurable).
+    Maximum files per job: 10 (configurable).
+    """
+    # Verify job exists
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check file count limit
+    existing_attachments = job.get("attachments", [])
+    if len(existing_attachments) >= MAX_FILES_PER_JOB:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {MAX_FILES_PER_JOB} files per job"
+        )
+
+    # Validate filename
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename required")
+
+    if not is_allowed_file(file.filename):
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not allowed. See /api/files/allowed-types for accepted formats."
+        )
+
+    # Read file content
+    content = await file.read()
+
+    # Validate size
+    if len(content) > MAX_FILE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds maximum size of {MAX_FILE_SIZE_MB}MB"
+        )
+
+    try:
+        # Save file
+        attachment = await save_upload(
+            job_id=job_id,
+            filename=file.filename,
+            content=content,
+            uploaded_by=uploaded_by,
+        )
+
+        # Update job with attachment metadata
+        attachments = existing_attachments + [attachment.model_dump()]
+        await update_job(job_id, {"attachments": attachments})
+
+        return {
+            "file_id": attachment.file_id,
+            "filename": attachment.original_filename,
+            "category": attachment.category.value,
+            "size": format_file_size(attachment.size_bytes),
+            "mime_type": attachment.mime_type,
+            "checksum": attachment.checksum_sha256,
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/jobs/{job_id}/files")
+async def list_job_files(job_id: str):
+    """List all files attached to a job."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    attachments = job.get("attachments", [])
+    return {
+        "job_id": job_id,
+        "count": len(attachments),
+        "files": [
+            {
+                "file_id": a.get("file_id"),
+                "filename": a.get("original_filename"),
+                "category": a.get("category"),
+                "size": format_file_size(a.get("size_bytes", 0)),
+                "mime_type": a.get("mime_type"),
+                "uploaded_at": a.get("uploaded_at"),
+            }
+            for a in attachments
+        ],
+    }
+
+
+@app.get("/api/jobs/{job_id}/files/{file_id}")
+async def download_job_file(job_id: str, file_id: str):
+    """Download a specific file attached to a job."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Find the attachment
+    attachments = job.get("attachments", [])
+    attachment_data = next((a for a in attachments if a.get("file_id") == file_id), None)
+
+    if not attachment_data:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    attachment = JobAttachment(**attachment_data)
+    file_path = await get_file_path(attachment)
+
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    return FileResponse(
+        path=file_path,
+        filename=attachment.original_filename,
+        media_type=attachment.mime_type,
+    )
+
+
+@app.delete("/api/jobs/{job_id}/files/{file_id}")
+async def delete_job_file(job_id: str, file_id: str):
+    """Delete a file attached to a job."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Find the attachment
+    attachments = job.get("attachments", [])
+    attachment_data = next((a for a in attachments if a.get("file_id") == file_id), None)
+
+    if not attachment_data:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    attachment = JobAttachment(**attachment_data)
+
+    # Delete from filesystem
+    await delete_file(attachment)
+
+    # Remove from job
+    updated_attachments = [a for a in attachments if a.get("file_id") != file_id]
+    await update_job(job_id, {"attachments": updated_attachments})
+
+    return {"status": "deleted", "file_id": file_id}
+
+
+@app.get("/api/jobs/{job_id}/result/export")
+async def export_job_result(
+    job_id: str,
+    format: ExportFormat = ExportFormat.JSON,
+):
+    """Export job result in various formats.
+
+    Formats:
+    - json: Formatted JSON
+    - csv: CSV (best effort for tabular data)
+    - markdown: Markdown with structure
+    - text: Plain text extraction
+    """
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = job.get("result")
+    if not result:
+        raise HTTPException(status_code=400, detail="Job has no result yet")
+
+    job_title = job.get("title", "Job Result")
+
+    # Generate export
+    if format == ExportFormat.JSON:
+        content = export_result_as_json(result)
+        media_type = "application/json"
+        extension = "json"
+    elif format == ExportFormat.CSV:
+        content = export_result_as_csv(result)
+        media_type = "text/csv"
+        extension = "csv"
+    elif format == ExportFormat.MARKDOWN:
+        content = export_result_as_markdown(result, job_title)
+        media_type = "text/markdown"
+        extension = "md"
+    else:  # TEXT
+        content = export_result_as_text(result)
+        media_type = "text/plain"
+        extension = "txt"
+
+    # Generate filename
+    safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in job_title[:30])
+    filename = f"{safe_title}_{job_id[-8:]}.{extension}"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 # ============================================================

@@ -131,6 +131,21 @@ class DataContext(BaseModel):
     sample_schema: Optional[dict] = None
 
 
+class JobAttachmentMeta(BaseModel):
+    """Metadata for a file attached to a job."""
+    file_id: str
+    job_id: str
+    filename: str
+    original_filename: str
+    category: str  # code, image, document, data, other
+    mime_type: str
+    size_bytes: int
+    checksum_sha256: str
+    uploaded_by: str
+    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+    storage_path: str
+
+
 class BazaarJob(BaseModel):
     """Posted task awaiting completion."""
     job_id: str
@@ -149,6 +164,9 @@ class BazaarJob(BaseModel):
 
     # Data context
     data_context: Optional[DataContext] = None
+
+    # File attachments (code, images, documents, data files)
+    attachments: list[JobAttachmentMeta] = Field(default_factory=list)
 
     # Budget & timeline
     budget_usd: float
