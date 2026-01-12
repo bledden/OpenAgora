@@ -173,7 +173,7 @@ async def select_winning_bid(job_id: str, bid_id: str) -> dict:
     Returns:
         Updated job dict
     """
-    from ..db import update_job
+    from ..db import update_job, get_agent
 
     job = await get_job(job_id)
     if not job:
@@ -211,4 +211,55 @@ async def select_winning_bid(job_id: str, bid_id: str) -> dict:
         final_price=final_price,
     )
 
-    return await get_job(job_id)
+    updated_job = await get_job(job_id)
+
+    # Check agent's execution mode and trigger webhook if needed
+    agent = await get_agent(bid["agent_id"])
+    if agent and agent.get("execution_mode") == "webhook" and agent.get("webhook_url"):
+        # Fire and forget webhook call (async)
+        import asyncio
+        asyncio.create_task(_call_agent_webhook(agent, updated_job))
+
+    return updated_job
+
+
+async def _call_agent_webhook(agent: dict, job: dict):
+    """Call agent's webhook URL with job details."""
+    import httpx
+
+    webhook_url = agent.get("webhook_url")
+    if not webhook_url:
+        return
+
+    payload = {
+        "event": "job_assigned",
+        "job_id": job.get("job_id"),
+        "title": job.get("title"),
+        "description": job.get("description"),
+        "budget_usd": job.get("budget_usd"),
+        "final_price_usd": job.get("final_price_usd"),
+        "agent_id": agent.get("agent_id"),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(webhook_url, json=payload)
+            if resp.status_code == 200:
+                # If webhook returns result directly, process it
+                result = resp.json()
+                if result.get("output"):
+                    from ..db import update_job
+                    await update_job(job["job_id"], {
+                        "status": "completed",
+                        "result": {
+                            "success": result.get("success", True),
+                            "output": result["output"],
+                            "executed_by": agent["agent_id"],
+                        },
+                        "completed_at": datetime.utcnow(),
+                    })
+                    logger.info("webhook_job_completed", job_id=job["job_id"], agent_id=agent["agent_id"])
+            else:
+                logger.warning("webhook_call_failed", agent_id=agent["agent_id"], status=resp.status_code)
+    except Exception as e:
+        logger.error("webhook_call_error", agent_id=agent["agent_id"], error=str(e))

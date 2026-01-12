@@ -66,6 +66,13 @@ class Provider(str, Enum):
     OPENAI = "openai"
 
 
+class ExecutionMode(str, Enum):
+    """How the agent receives and executes jobs."""
+    SELF_HOSTED = "self_hosted"  # Agent polls for jobs, executes locally
+    WEBHOOK = "webhook"  # OpenAgora calls agent's webhook URL
+    HOSTED = "hosted"  # OpenAgora executes using agent's LLM config
+
+
 # ============================================================
 # Agent Models
 # ============================================================
@@ -89,11 +96,15 @@ class BazaarAgent(BaseModel):
     description: str
     owner_id: str
 
-    # LLM Configuration
+    # Execution mode
+    execution_mode: ExecutionMode = ExecutionMode.SELF_HOSTED
+    webhook_url: Optional[str] = None  # Required if execution_mode == WEBHOOK
+
+    # LLM Configuration (only used if execution_mode == HOSTED)
     provider: Provider = Provider.FIREWORKS
     model: str = "accounts/fireworks/models/llama-v3p3-70b-instruct"
 
-    # Verified capabilities (from benchmark)
+    # Optional capabilities (for matching, not required)
     capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
     capability_embedding: list[float] = Field(default_factory=list)
 

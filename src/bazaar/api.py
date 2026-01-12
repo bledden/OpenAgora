@@ -158,12 +158,22 @@ class AgentRegisterRequest(BaseModel):
     description: str
     owner_id: str  # Owner's wallet or identifier
     wallet_address: str  # x402 payment address for receiving payments
+
+    # Execution mode: self_hosted (agent polls), webhook (we call you), hosted (we run LLM)
+    execution_mode: str = "self_hosted"
+    webhook_url: Optional[str] = None  # Required if execution_mode == "webhook"
+
+    # Only needed for hosted execution
     provider: str = "fireworks"  # LLM provider: fireworks, nvidia, openai
     model: Optional[str] = None  # Model identifier (defaults by provider)
+
+    # Pricing
     base_rate_usd: float = 0.01  # Minimum price per task
     rate_per_1k_tokens: float = 0.001  # Token-based pricing
+
+    # Optional
+    capabilities: Optional[Dict[str, float]] = None  # Optional capability scores
     skip_benchmark: bool = False  # Skip benchmark (for testing only)
-    webhook_url: Optional[str] = None  # URL to notify when jobs are available
 
 
 class AgentUpdateRequest(BaseModel):
@@ -362,18 +372,29 @@ async def get_agent_details(agent_id: str):
 async def register_agent(request: AgentRegisterRequest):
     """Register a new agent on the marketplace.
 
-    This endpoint allows developers to register their AI agents to receive jobs.
-    The agent will be benchmarked to verify its capabilities (unless skip_benchmark=true).
+    Execution modes:
+    - self_hosted: Agent polls for assigned jobs and submits results
+    - webhook: OpenAgora POSTs jobs to your webhook_url, you return results
+    - hosted: OpenAgora executes using your LLM config (requires provider/model)
 
-    Benchmarking runs ~21 tests across 5 capability categories:
-    - Summarization
-    - Sentiment Analysis
-    - Data Extraction
-    - Classification
-    - Pattern Recognition
-
+    For self_hosted and webhook modes, benchmarking is skipped.
     Rate limited to 1 registration per owner per 5 minutes.
     """
+    # Validate execution mode
+    valid_modes = ["self_hosted", "webhook", "hosted"]
+    if request.execution_mode not in valid_modes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid execution_mode. Must be one of: {valid_modes}"
+        )
+
+    # Validate webhook URL for webhook mode
+    if request.execution_mode == "webhook" and not request.webhook_url:
+        raise HTTPException(
+            status_code=400,
+            detail="webhook_url is required when execution_mode is 'webhook'"
+        )
+
     # Rate limiting check
     now = datetime.utcnow()
     last_registration = _registration_cooldowns.get(request.owner_id)
@@ -386,6 +407,9 @@ async def register_agent(request: AgentRegisterRequest):
                 detail=f"Rate limited. Please wait {remaining} seconds before registering another agent."
             )
 
+    # Skip benchmark for self_hosted and webhook modes
+    skip_benchmark = request.skip_benchmark or request.execution_mode in ["self_hosted", "webhook"]
+
     try:
         agent = await do_register_agent(
             name=request.name,
@@ -396,30 +420,36 @@ async def register_agent(request: AgentRegisterRequest):
             wallet_address=request.wallet_address,
             base_rate_usd=request.base_rate_usd,
             rate_per_1k_tokens=request.rate_per_1k_tokens,
-            skip_benchmark=request.skip_benchmark,
+            skip_benchmark=skip_benchmark,
         )
 
         # Update cooldown
         _registration_cooldowns[request.owner_id] = now
 
-        # Store webhook URL if provided
+        # Store execution mode and webhook URL
+        updates = {"execution_mode": request.execution_mode}
         if request.webhook_url:
-            await db_update_agent(agent.agent_id, {"webhook_url": request.webhook_url})
+            updates["webhook_url"] = request.webhook_url
+        if request.capabilities:
+            updates["capabilities"] = request.capabilities
+        await db_update_agent(agent.agent_id, updates)
 
         logger.info(
             "agent_registered_via_api",
             agent_id=agent.agent_id,
             name=agent.name,
             owner_id=request.owner_id,
+            execution_mode=request.execution_mode,
         )
 
         return {
             "success": True,
             "agent_id": agent.agent_id,
             "name": agent.name,
+            "execution_mode": request.execution_mode,
             "status": agent.status.value if hasattr(agent.status, 'value') else agent.status,
-            "capabilities": agent.capabilities.model_dump() if hasattr(agent.capabilities, 'model_dump') else agent.capabilities,
-            "message": "Agent registered successfully. Capabilities have been benchmarked." if not request.skip_benchmark else "Agent registered (benchmark skipped).",
+            "wallet_address": request.wallet_address,
+            "message": f"Agent registered with {request.execution_mode} execution mode.",
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
