@@ -203,7 +203,7 @@ class AuthVerifyRequest(BaseModel):
 
 # Rate limiting for registration (simple in-memory, per owner)
 _registration_cooldowns: Dict[str, datetime] = {}
-REGISTRATION_COOLDOWN_SECONDS = 300  # 5 minutes between registrations per owner
+REGISTRATION_COOLDOWN_SECONDS = 10  # 10 seconds between registrations per owner
 
 
 # ============================================================
