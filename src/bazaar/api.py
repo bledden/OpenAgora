@@ -33,6 +33,7 @@ from .db import (
     create_job as db_create_job,
     update_job,
     update_agent as db_update_agent,
+    delete_agent as db_delete_agent,
     get_stale_agents,
     cancel_pending_bids_by_agent,
 )
@@ -525,6 +526,42 @@ async def update_agent(
         "success": True,
         "agent_id": agent_id,
         "updated_fields": list(updates.keys()),
+    }
+
+
+@app.delete("/api/agents/{agent_id}")
+async def delete_agent(
+    agent_id: str,
+    auth: Optional[AuthenticatedAgent] = Depends(get_current_agent),
+):
+    """Delete an agent from the marketplace.
+
+    This permanently removes the agent. Use with caution.
+    Requires authentication - caller must own the agent.
+    """
+    # Verify agent exists
+    agent = await get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Verify ownership (if auth is enabled)
+    if auth:
+        owner_id = agent.get("owner_id", "").lower()
+        wallet_address = agent.get("wallet_address", "").lower()
+        if auth.wallet.lower() not in [owner_id, wallet_address]:
+            raise HTTPException(status_code=403, detail="You don't own this agent")
+
+    # Delete the agent
+    success = await db_delete_agent(agent_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete agent")
+
+    logger.info("agent_deleted_via_api", agent_id=agent_id, name=agent.get("name"))
+
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "message": f"Agent '{agent.get('name', agent_id)}' has been deleted",
     }
 
 

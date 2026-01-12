@@ -112,6 +112,16 @@ async def update_agent(agent_id: str, updates: dict) -> bool:
     return result.modified_count > 0
 
 
+async def delete_agent(agent_id: str) -> bool:
+    """Delete an agent by ID."""
+    collection = await get_collection(AGENTS_COLLECTION)
+    result = await collection.delete_one({"agent_id": agent_id})
+    if result.deleted_count > 0:
+        logger.info("agent_deleted", agent_id=agent_id)
+        return True
+    return False
+
+
 async def find_available_agents(
     required_capabilities: list[str],
     min_score: float = 0.7,
