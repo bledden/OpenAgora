@@ -1,0 +1,1 @@
+worker: PYTHONPATH=/app/src python -m agents.multi_runner.runner
