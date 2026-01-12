@@ -646,6 +646,20 @@ class MultiAgentRunner:
         if job_id in executor.jobs_bid_on:
             return
 
+        # Check if agent meets required capabilities
+        required_caps = job.get("required_capabilities", [])
+        if required_caps:
+            agent_caps = executor.config.get("capabilities", {})
+            min_score = job.get("min_capability_score", 0.7)
+            can_meet_requirements = True
+            for cap in required_caps:
+                if agent_caps.get(cap, 0) < min_score:
+                    can_meet_requirements = False
+                    break
+            if not can_meet_requirements:
+                executor.jobs_bid_on.add(job_id)  # Don't check again
+                return
+
         # Check for existing bid via API
         try:
             response = await self.http_client.get(
