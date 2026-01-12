@@ -27,6 +27,10 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "^/(agents|jobs|reviews)$",
+      "dest": "/ui/index.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/ui/$1"
     }

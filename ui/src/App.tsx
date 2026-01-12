@@ -1,6 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
+// Extend Window interface for ethereum
+declare global {
+  interface Window {
+    ethereum?: {
+      request: (args: { method: string; params?: unknown[] }) => Promise<string[]>;
+      on?: (event: string, callback: (accounts: string[]) => void) => void;
+    };
+  }
+}
 import {
   Bot,
   Briefcase,
@@ -21,7 +31,29 @@ import {
   ClipboardCheck,
   CheckCircle,
   AlertTriangle,
+  Wallet,
+  LogOut,
+  ExternalLink,
 } from "lucide-react";
+
+// ============================================================
+// URL Routing Helpers
+// ============================================================
+
+const getViewFromPath = (): ViewType => {
+  const path = window.location.pathname;
+  if (path === "/agents") return "agents";
+  if (path === "/jobs") return "jobs";
+  if (path === "/reviews") return "reviews";
+  return "home";
+};
+
+const setPathForView = (view: ViewType) => {
+  const path = view === "home" ? "/" : `/${view}`;
+  if (window.location.pathname !== path) {
+    window.history.pushState({}, "", path);
+  }
+};
 
 // ============================================================
 // Types
@@ -128,10 +160,18 @@ function Header({
   currentView,
   onNavigate,
   pendingReviews,
+  walletAddress,
+  isConnecting,
+  onConnectWallet,
+  onDisconnectWallet,
 }: {
   currentView: ViewType;
   onNavigate: (view: ViewType) => void;
   pendingReviews: number;
+  walletAddress: string | null;
+  isConnecting: boolean;
+  onConnectWallet: () => void;
+  onDisconnectWallet: () => void;
 }) {
   return (
     <header className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-800">
@@ -193,6 +233,34 @@ function Header({
               <span className="text-xs text-slate-300">Base</span>
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             </div>
+
+            {/* Wallet Connection */}
+            {walletAddress ? (
+              <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
+                  <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-xs text-slate-300 font-mono">
+                    {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+                  </span>
+                </div>
+                <button
+                  onClick={onDisconnectWallet}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  title="Disconnect wallet"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onConnectWallet}
+                disabled={isConnecting}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+              >
+                <Wallet className="w-4 h-4" />
+                <span>{isConnecting ? "Connecting..." : "Connect"}</span>
+              </button>
+            )}
 
             {/* Post Job CTA */}
             <button
@@ -796,6 +864,129 @@ function ReviewModal({
 }
 
 // ============================================================
+// Wallet Install Modal
+// ============================================================
+
+function WalletInstallModal({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  if (!isOpen) return null;
+
+  const wallets = [
+    {
+      name: "MetaMask",
+      description: "Most popular browser wallet for Ethereum & Base",
+      url: "https://metamask.io/download/",
+      icon: "🦊",
+      recommended: true,
+    },
+    {
+      name: "Coinbase Wallet",
+      description: "Easy-to-use wallet with Base network support",
+      url: "https://www.coinbase.com/wallet/downloads",
+      icon: "🔵",
+      recommended: false,
+    },
+    {
+      name: "Rainbow",
+      description: "Beautiful mobile-first Ethereum wallet",
+      url: "https://rainbow.me/download",
+      icon: "🌈",
+      recommended: false,
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}></div>
+
+      {/* Modal */}
+      <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-800">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Web3 Wallet Required</h2>
+            <p className="text-sm text-slate-500">Install a wallet to connect</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-5 space-y-4">
+          {/* Info Banner */}
+          <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+            <div className="flex items-start gap-3">
+              <Wallet className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm text-slate-300">
+                  Open Agora uses <strong className="text-white">USDC on Base</strong> for payments.
+                  A Web3 wallet lets you securely pay agents and receive payments.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Wallet Options */}
+          <div className="space-y-3">
+            <p className="text-sm text-slate-400">Choose a wallet to get started:</p>
+            {wallets.map((wallet) => (
+              <a
+                key={wallet.name}
+                href={wallet.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-4 p-4 bg-slate-800/50 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 rounded-xl transition-colors group"
+              >
+                <span className="text-2xl">{wallet.icon}</span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-white">{wallet.name}</span>
+                    {wallet.recommended && (
+                      <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs rounded">
+                        Recommended
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-400">{wallet.description}</p>
+                </div>
+                <ExternalLink className="w-4 h-4 text-slate-500 group-hover:text-slate-300 transition-colors" />
+              </a>
+            ))}
+          </div>
+
+          {/* Help Text */}
+          <div className="pt-2 border-t border-slate-800">
+            <p className="text-xs text-slate-500 text-center">
+              After installing, refresh this page and click "Connect" to link your wallet.
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-5 border-t border-slate-800">
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium rounded-lg transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Home View
 // ============================================================
 
@@ -1261,7 +1452,7 @@ function ReviewsView({
 // ============================================================
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<ViewType>("home");
+  const [currentView, setCurrentView] = useState<ViewType>(getViewFromPath);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
@@ -1269,6 +1460,56 @@ export default function App() {
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [selectedReview, setSelectedReview] = useState<PendingReview | null>(null);
+
+  // Wallet state
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [showWalletInstallModal, setShowWalletInstallModal] = useState(false);
+
+  // Wallet connection handlers
+  const connectWallet = async () => {
+    if (typeof window.ethereum === "undefined") {
+      setShowWalletInstallModal(true);
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      });
+      if (accounts && accounts.length > 0) {
+        setWalletAddress(accounts[0]);
+        localStorage.setItem("walletAddress", accounts[0]);
+      }
+    } catch (error) {
+      console.error("Failed to connect wallet:", error);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnectWallet = () => {
+    setWalletAddress(null);
+    localStorage.removeItem("walletAddress");
+  };
+
+  // Restore wallet on mount
+  useEffect(() => {
+    const savedWallet = localStorage.getItem("walletAddress");
+    if (savedWallet) {
+      setWalletAddress(savedWallet);
+    }
+  }, []);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentView(getViewFromPath());
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -1401,6 +1642,7 @@ export default function App() {
       setIsPostModalOpen(true);
     } else {
       setCurrentView(view);
+      setPathForView(view);
     }
   };
 
@@ -1423,6 +1665,10 @@ export default function App() {
         currentView={currentView}
         onNavigate={handleNavigate}
         pendingReviews={pendingReviews.length}
+        walletAddress={walletAddress}
+        isConnecting={isConnecting}
+        onConnectWallet={connectWallet}
+        onDisconnectWallet={disconnectWallet}
       />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
@@ -1507,6 +1753,11 @@ export default function App() {
         review={selectedReview}
         onClose={() => setSelectedReview(null)}
         onSubmit={submitReview}
+      />
+
+      <WalletInstallModal
+        isOpen={showWalletInstallModal}
+        onClose={() => setShowWalletInstallModal(false)}
       />
     </div>
   );
