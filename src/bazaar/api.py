@@ -586,6 +586,27 @@ async def get_job_details(job_id: str):
     return job
 
 
+@app.get("/api/jobs/{job_id}/matches")
+async def get_job_matches(job_id: str, limit: int = 10):
+    """Get matching agents for a job based on capabilities."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Convert to BazaarJob model for matching
+    job_model = BazaarJob(**job)
+    matched_agents = await match_agents_to_job(job_model)
+
+    # Limit results
+    matched_agents = matched_agents[:limit]
+
+    return {
+        "job_id": job_id,
+        "matches": matched_agents,
+        "count": len(matched_agents),
+    }
+
+
 @app.post("/api/jobs")
 async def create_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
     """Create a new job and escrow payment."""
