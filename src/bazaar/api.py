@@ -61,6 +61,8 @@ from .auth import (
     get_current_agent,
     require_auth,
     require_agent_owner,
+    require_job_poster,
+    require_bid_poster,
     AuthenticatedAgent,
     cleanup_expired,
 )
@@ -704,8 +706,12 @@ async def place_bid(
 
 
 @app.post("/api/jobs/{job_id}/select-bid/{bid_id}")
-async def select_bid(job_id: str, bid_id: str):
-    """Select winning bid for a job."""
+async def select_bid(
+    job_id: str,
+    bid_id: str,
+    auth: AuthenticatedAgent = Depends(require_job_poster()),
+):
+    """Select winning bid for a job. Only the job poster can select a bid."""
     try:
         job = await select_winning_bid(job_id, bid_id)
         return {"job_id": job_id, "winning_bid_id": bid_id, "status": job["status"]}
@@ -770,8 +776,37 @@ class HumanReviewRequest(BaseModel):
 
 
 @app.post("/api/bids/{bid_id}/counter")
-async def counter_offer_endpoint(bid_id: str, request: CounterOfferRequest):
-    """Make a counter-offer on a bid."""
+async def counter_offer_endpoint(
+    bid_id: str,
+    request: CounterOfferRequest,
+    auth: AuthenticatedAgent = Depends(require_auth),
+):
+    """Make a counter-offer on a bid. Poster can counter agent's price, agent can counter poster's offer."""
+    # Validate that caller matches the "by" field
+    from .db import get_bid, get_job, get_agent
+    bid_data = await get_bid(bid_id)
+    if not bid_data:
+        raise HTTPException(status_code=404, detail="Bid not found")
+
+    job_data = await get_job(bid_data["job_id"])
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    caller_wallet = auth.wallet.lower()
+    poster_wallet = job_data.get("poster_wallet", "").lower()
+    poster_id = job_data.get("poster_id", "").lower()
+
+    # Get agent wallet
+    agent_data = await get_agent(bid_data["agent_id"])
+    agent_wallet = agent_data.get("wallet_address", "").lower() if agent_data else ""
+
+    if request.by == "poster":
+        if caller_wallet not in [poster_wallet, poster_id]:
+            raise HTTPException(status_code=403, detail="Only the job poster can make poster counter-offers")
+    elif request.by == "agent":
+        if caller_wallet != agent_wallet:
+            raise HTTPException(status_code=403, detail="Only the bidding agent can make agent counter-offers")
+
     try:
         bid = await make_counter_offer(
             bid_id=bid_id,
@@ -790,8 +825,35 @@ async def counter_offer_endpoint(bid_id: str, request: CounterOfferRequest):
 
 
 @app.post("/api/bids/{bid_id}/accept-counter")
-async def accept_counter_endpoint(bid_id: str, by: str = "poster"):
-    """Accept the latest counter-offer."""
+async def accept_counter_endpoint(
+    bid_id: str,
+    by: str = "poster",
+    auth: AuthenticatedAgent = Depends(require_auth),
+):
+    """Accept the latest counter-offer. Only the party who received the counter can accept."""
+    from .db import get_bid, get_job, get_agent
+    bid_data = await get_bid(bid_id)
+    if not bid_data:
+        raise HTTPException(status_code=404, detail="Bid not found")
+
+    job_data = await get_job(bid_data["job_id"])
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    caller_wallet = auth.wallet.lower()
+    poster_wallet = job_data.get("poster_wallet", "").lower()
+    poster_id = job_data.get("poster_id", "").lower()
+
+    agent_data = await get_agent(bid_data["agent_id"])
+    agent_wallet = agent_data.get("wallet_address", "").lower() if agent_data else ""
+
+    if by == "poster":
+        if caller_wallet not in [poster_wallet, poster_id]:
+            raise HTTPException(status_code=403, detail="Only the job poster can accept as poster")
+    elif by == "agent":
+        if caller_wallet != agent_wallet:
+            raise HTTPException(status_code=403, detail="Only the bidding agent can accept as agent")
+
     try:
         bid = await accept_counter_offer(bid_id, by)
         return {
@@ -804,14 +866,17 @@ async def accept_counter_endpoint(bid_id: str, by: str = "poster"):
 
 
 @app.post("/api/bids/{bid_id}/approve")
-async def approve_bid_endpoint(bid_id: str, approver_id: str):
-    """Human approval for high-value bids."""
+async def approve_bid_endpoint(
+    bid_id: str,
+    auth: AuthenticatedAgent = Depends(require_bid_poster()),
+):
+    """Human approval for high-value bids. Only job poster can approve."""
     try:
-        bid = await approve_bid(bid_id, approver_id)
+        bid = await approve_bid(bid_id, auth.wallet)
         return {
             "bid_id": bid_id,
             "status": "approved",
-            "approved_by": approver_id,
+            "approved_by": auth.wallet,
             "final_price": bid.get("final_price_usd"),
         }
     except ValueError as e:
@@ -819,18 +884,26 @@ async def approve_bid_endpoint(bid_id: str, approver_id: str):
 
 
 @app.post("/api/bids/{bid_id}/reject")
-async def reject_bid_endpoint(bid_id: str, rejector_id: str, reason: str = ""):
-    """Reject a bid."""
+async def reject_bid_endpoint(
+    bid_id: str,
+    reason: str = "",
+    auth: AuthenticatedAgent = Depends(require_bid_poster()),
+):
+    """Reject a bid. Only job poster can reject bids."""
     try:
-        bid = await reject_bid(bid_id, rejector_id, reason)
+        bid = await reject_bid(bid_id, auth.wallet, reason)
         return {"bid_id": bid_id, "status": "rejected"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/bids/{bid_id}/auto-negotiate")
-async def auto_negotiate_endpoint(bid_id: str, request: AutoNegotiateRequest):
-    """Use AI to automatically negotiate."""
+async def auto_negotiate_endpoint(
+    bid_id: str,
+    request: AutoNegotiateRequest,
+    auth: AuthenticatedAgent = Depends(require_bid_poster()),
+):
+    """Use AI to automatically negotiate. Only job poster can trigger auto-negotiation."""
     try:
         bid = await auto_negotiate(
             bid_id=bid_id,

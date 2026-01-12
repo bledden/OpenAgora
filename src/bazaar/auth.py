@@ -341,6 +341,103 @@ def require_agent_owner(agent_id: str):
     return dependency
 
 
+def require_job_poster(job_id_param: str = "job_id"):
+    """Factory for dependency that requires the caller to be the job poster.
+
+    Verifies that the authenticated wallet matches the job's poster_wallet.
+
+    Usage:
+        @app.post("/api/jobs/{job_id}/select-bid/{bid_id}")
+        async def select_bid(
+            job_id: str,
+            bid_id: str,
+            auth: AuthenticatedAgent = Depends(require_job_poster())
+        ):
+            ...
+    """
+    async def dependency(
+        request: Request,
+        agent: AuthenticatedAgent = Depends(require_auth),
+    ) -> AuthenticatedAgent:
+        # Get job_id from path
+        path_job_id = request.path_params.get(job_id_param)
+
+        if not path_job_id:
+            raise HTTPException(status_code=400, detail=f"No {job_id_param} in path")
+
+        # Look up job to verify poster ownership
+        from .db import get_job
+        job_data = await get_job(path_job_id)
+
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        poster_wallet = job_data.get("poster_wallet", "").lower()
+        poster_id = job_data.get("poster_id", "").lower()
+
+        # Allow if caller's wallet matches poster_wallet or poster_id
+        if agent.wallet.lower() not in [poster_wallet, poster_id]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the job poster can perform this action",
+            )
+
+        return agent
+
+    return dependency
+
+
+def require_bid_poster():
+    """Factory for dependency that requires the caller to be the job poster for a bid.
+
+    Looks up the bid to get job_id, then verifies poster ownership.
+
+    Usage:
+        @app.post("/api/bids/{bid_id}/reject")
+        async def reject_bid(
+            bid_id: str,
+            auth: AuthenticatedAgent = Depends(require_bid_poster())
+        ):
+            ...
+    """
+    async def dependency(
+        request: Request,
+        agent: AuthenticatedAgent = Depends(require_auth),
+    ) -> AuthenticatedAgent:
+        # Get bid_id from path
+        path_bid_id = request.path_params.get("bid_id")
+
+        if not path_bid_id:
+            raise HTTPException(status_code=400, detail="No bid_id in path")
+
+        # Look up bid to get job_id
+        from .db import get_bid, get_job
+        bid_data = await get_bid(path_bid_id)
+
+        if not bid_data:
+            raise HTTPException(status_code=404, detail="Bid not found")
+
+        job_id = bid_data.get("job_id")
+        job_data = await get_job(job_id)
+
+        if not job_data:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        poster_wallet = job_data.get("poster_wallet", "").lower()
+        poster_id = job_data.get("poster_id", "").lower()
+
+        # Allow if caller's wallet matches poster_wallet or poster_id
+        if agent.wallet.lower() not in [poster_wallet, poster_id]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the job poster can perform this action",
+            )
+
+        return agent
+
+    return dependency
+
+
 # Cleanup expired challenges/sessions periodically
 def cleanup_expired():
     """Remove expired challenges and sessions."""
