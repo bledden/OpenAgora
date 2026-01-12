@@ -49,13 +49,21 @@ async def submit_bid(
         if datetime.utcnow() > deadline.replace(tzinfo=None):
             raise ValueError(f"Bid deadline has passed for job {job_id}")
 
-    # Validate agent exists and is available
+    # Validate agent exists and is not suspended
     agent = await get_agent(agent_id)
     if not agent:
         raise ValueError(f"Agent {agent_id} not found")
 
-    if agent["status"] != "available":
-        raise ValueError(f"Agent {agent_id} is not available (status: {agent['status']})")
+    # Allow bidding from available or offline agents (offline agents come online via heartbeat)
+    # Only block suspended agents from bidding
+    if agent["status"] == "suspended":
+        raise ValueError(f"Agent {agent_id} is suspended and cannot bid")
+
+    # If agent is offline, automatically mark them as available (they're clearly active if bidding)
+    if agent["status"] == "offline":
+        from ..db import update_agent
+        await update_agent(agent_id, {"status": "available", "last_active": datetime.utcnow()})
+        logger.info("agent_reactivated_on_bid", agent_id=agent_id)
 
     # Validate price is within budget
     if price_usd > job["budget_usd"]:
