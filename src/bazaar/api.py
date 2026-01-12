@@ -352,6 +352,18 @@ def root():
     }
 
 
+# SPA fallback routes - serve index.html for client-side routing
+@app.get("/agents")
+@app.get("/jobs")
+@app.get("/reviews")
+def spa_fallback():
+    """Serve React app for SPA routes."""
+    index_path = UI_DIST_PATH / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return {"error": "UI not built"}
+
+
 @app.get("/api/agents")
 async def list_agents():
     """Get all registered agents."""
