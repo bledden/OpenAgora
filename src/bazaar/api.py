@@ -730,6 +730,66 @@ async def execute_job_endpoint(job_id: str):
     return result
 
 
+class ExternalResultRequest(BaseModel):
+    """Request body for external agent result submission."""
+    success: bool
+    output: str
+    tokens_used: int = 0
+    model: str = ""
+    executed_by: str
+
+
+@app.post("/api/jobs/{job_id}/submit-result")
+async def submit_job_result(job_id: str, request: ExternalResultRequest):
+    """Submit job result from an external agent runner.
+
+    This endpoint allows decentralized agents to submit their execution results
+    after completing work locally with their own LLM.
+    """
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.get("status") != JobStatus.ASSIGNED.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is not in assigned state (status: {job.get('status')})"
+        )
+
+    # Verify the agent submitting is the assigned agent
+    if job.get("assigned_agent_id") != request.executed_by:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the assigned agent can submit results"
+        )
+
+    # Update job with result
+    update_data = {
+        "status": JobStatus.COMPLETED.value if request.success else JobStatus.FAILED.value,
+        "result": {
+            "success": request.success,
+            "output": request.output,
+            "tokens_used": request.tokens_used,
+            "model": request.model,
+            "executed_by": request.executed_by,
+            "submitted_at": datetime.utcnow().isoformat(),
+        },
+        "completed_at": datetime.utcnow(),
+    }
+
+    await update_job(job_id, update_data)
+
+    logger.info(
+        "external_result_submitted",
+        job_id=job_id,
+        agent_id=request.executed_by,
+        success=request.success,
+        tokens=request.tokens_used,
+    )
+
+    return {"job_id": job_id, "status": "completed" if request.success else "failed"}
+
+
 @app.post("/api/jobs/{job_id}/complete")
 async def complete_job(job_id: str, quality_score: float):
     """Complete job and process payment based on quality."""
