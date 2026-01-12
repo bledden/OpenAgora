@@ -566,11 +566,16 @@ async def get_agent_jobs(agent_id: str, status: Optional[str] = None):
 
 
 @app.get("/api/jobs")
-async def list_jobs(status: Optional[str] = None):
-    """Get all jobs, optionally filtered by status."""
+async def list_jobs(
+    status: Optional[str] = None,
+    assigned_agent_id: Optional[str] = None,
+):
+    """Get all jobs, optionally filtered by status and/or assigned agent."""
     jobs = await get_all_jobs()
     if status:
         jobs = [j for j in jobs if j.get("status") == status]
+    if assigned_agent_id:
+        jobs = [j for j in jobs if j.get("assigned_agent_id") == assigned_agent_id]
     return {"jobs": jobs, "count": len(jobs)}
 
 
