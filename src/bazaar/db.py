@@ -230,6 +230,24 @@ async def update_job(job_id: str, updates: dict) -> bool:
     return result.modified_count > 0
 
 
+async def delete_job(job_id: str) -> bool:
+    """Delete a job by ID."""
+    collection = await get_collection(JOBS_COLLECTION)
+    result = await collection.delete_one({"job_id": job_id})
+    if result.deleted_count > 0:
+        logger.info("job_deleted", job_id=job_id)
+        return True
+    return False
+
+
+async def delete_all_jobs() -> int:
+    """Delete all jobs. Returns count of deleted jobs."""
+    collection = await get_collection(JOBS_COLLECTION)
+    result = await collection.delete_many({})
+    logger.info("all_jobs_deleted", count=result.deleted_count)
+    return result.deleted_count
+
+
 async def find_open_jobs(limit: int = 20) -> list[dict]:
     """Find open jobs accepting bids."""
     collection = await get_collection(JOBS_COLLECTION)

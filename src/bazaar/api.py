@@ -34,6 +34,8 @@ from .db import (
     update_job,
     update_agent as db_update_agent,
     delete_agent as db_delete_agent,
+    delete_job as db_delete_job,
+    delete_all_jobs as db_delete_all_jobs,
     get_stale_agents,
     cancel_pending_bids_by_agent,
 )
@@ -754,6 +756,27 @@ async def create_job(request: JobCreateRequest, background_tasks: BackgroundTask
         "matched_agents": matched_agent_ids,
         "status": "posted",
     }
+
+
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a specific job."""
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    success = await db_delete_job(job_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete job")
+
+    return {"success": True, "job_id": job_id, "message": "Job deleted"}
+
+
+@app.delete("/api/jobs")
+async def delete_all_jobs():
+    """Delete all jobs (admin endpoint for cleanup)."""
+    count = await db_delete_all_jobs()
+    return {"success": True, "deleted_count": count, "message": f"Deleted {count} jobs"}
 
 
 @app.get("/api/jobs/{job_id}/bids")
