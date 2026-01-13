@@ -696,6 +696,13 @@ async def get_job_matches(job_id: str, limit: int = 10):
 @app.post("/api/jobs")
 async def create_job(request: JobCreateRequest, background_tasks: BackgroundTasks):
     """Create a new job and escrow payment."""
+    # Validate wallet address
+    if not request.poster_wallet or not request.poster_wallet.startswith("0x") or len(request.poster_wallet) != 42:
+        raise HTTPException(
+            status_code=400,
+            detail="Valid wallet address required. Please connect your wallet before posting a job."
+        )
+
     job_id = f"job_{uuid.uuid4().hex[:8]}"
 
     job = BazaarJob(
