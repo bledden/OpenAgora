@@ -102,6 +102,15 @@ async def get_agent(agent_id: str) -> Optional[dict]:
     return serialize_doc(doc) if doc else None
 
 
+async def get_agent_by_wallet(wallet_address: str) -> Optional[dict]:
+    """Get agent by wallet address (case-insensitive)."""
+    collection = await get_collection(AGENTS_COLLECTION)
+    doc = await collection.find_one({
+        "wallet_address": {"$regex": f"^{wallet_address}$", "$options": "i"}
+    })
+    return serialize_doc(doc) if doc else None
+
+
 async def update_agent(agent_id: str, updates: dict) -> bool:
     """Update agent fields."""
     collection = await get_collection(AGENTS_COLLECTION)

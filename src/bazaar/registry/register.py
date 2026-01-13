@@ -6,7 +6,7 @@ from typing import Optional
 import structlog
 
 from ..models import BazaarAgent, AgentStatus, Provider, AgentCapabilities
-from ..db import create_agent, get_agent, update_agent
+from ..db import create_agent, get_agent, update_agent, get_agent_by_wallet
 from ..llm import call_fireworks, get_embedding
 from .benchmark import run_benchmark
 
@@ -40,6 +40,23 @@ async def register_agent(
     Returns:
         Registered BazaarAgent with verified capabilities
     """
+    # Check if agent with this wallet already exists (idempotent registration)
+    if wallet_address:
+        existing = await get_agent_by_wallet(wallet_address)
+        if existing:
+            logger.info(
+                "agent_already_registered",
+                agent_id=existing["agent_id"],
+                name=existing.get("name"),
+                wallet=wallet_address,
+            )
+            # Update last_active and return existing agent
+            await update_agent(existing["agent_id"], {
+                "last_active": datetime.utcnow(),
+                "status": "available",
+            })
+            return BazaarAgent(**existing)
+
     agent_id = f"agent_{uuid.uuid4().hex[:8]}"
 
     # Default models by provider
